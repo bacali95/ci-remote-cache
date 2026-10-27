@@ -39,10 +39,23 @@ func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (s
 	return tok, nil
 }
 
-// fakeReadTracker satisfies cache.ReadTracker without Postgres. notify
+// noopArtifacts supplies the cache.Tracker methods the Nx adapter never
+// depends on: Nx uploads carry no metadata.
+type noopArtifacts struct{}
+
+func (noopArtifacts) RecordCacheArtifact(context.Context, string, int64, store.ArtifactMeta) error {
+	return nil
+}
+
+func (noopArtifacts) GetCacheArtifactMeta(context.Context, string) (store.ArtifactMeta, error) {
+	return store.ArtifactMeta{}, store.ErrNotFound
+}
+
+// fakeReadTracker satisfies cache.Tracker without Postgres. notify
 // lets a test block until an async RecordCacheRead call actually lands,
 // since cache.Service.Get fires it in a goroutine.
 type fakeReadTracker struct {
+	noopArtifacts
 	mu     sync.Mutex
 	calls  []string
 	notify chan string
@@ -70,7 +83,7 @@ type testServer struct {
 
 func (s *testServer) Handler() http.Handler { return s.handler }
 
-func newServer(backend storage.Backend, tokens *auth.CacheTokenAuth, reads cache.ReadTracker) *testServer {
+func newServer(backend storage.Backend, tokens *auth.CacheTokenAuth, reads cache.Tracker) *testServer {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := cache.New(backend, tokens, reads, log, 10*1024*1024)
 	return &testServer{Service: svc, handler: protocol.Handler(log, New(svc, log))}
@@ -147,8 +160,8 @@ func TestGetHitRecordsReadButMissDoesNot(t *testing.T) {
 	}
 	select {
 	case hash := <-reads.notify:
-		if hash != "abc123" {
-			t.Fatalf("recorded read for %q, want abc123", hash)
+		if hash != "nx/abc123" {
+			t.Fatalf("recorded read for %q, want nx/abc123", hash)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RecordCacheRead was not called within 2s of a cache hit")

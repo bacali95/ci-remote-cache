@@ -12,7 +12,10 @@ import (
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/cache"
 	"nx-remote-cache/internal/storage"
+	"nx-remote-cache/internal/store"
 )
+
+const namespace = "nx"
 
 type Protocol struct {
 	svc *cache.Service
@@ -23,7 +26,7 @@ func New(svc *cache.Service, log *slog.Logger) *Protocol {
 	return &Protocol{svc: svc, log: log}
 }
 
-func (p *Protocol) Name() string { return "nx" }
+func (p *Protocol) Name() string { return namespace }
 
 func (p *Protocol) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/cache/{hash}", p.handleGet)
@@ -60,7 +63,7 @@ func (p *Protocol) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, size, err := p.svc.Get(r.Context(), hash)
+	body, size, err := p.svc.Get(r.Context(), namespace, hash)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -100,7 +103,7 @@ func (p *Protocol) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := p.svc.Put(r.Context(), hash, r.Body, r.ContentLength)
+	err := p.svc.Put(r.Context(), namespace, hash, r.Body, r.ContentLength, store.ArtifactMeta{})
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusOK)

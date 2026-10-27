@@ -107,7 +107,10 @@ func TestHandlePutReturns500WhenBackendPutFails(t *testing.T) {
 
 // failingReadTracker always errors: the download itself must still succeed
 // even though tracking the read errors out.
-type failingReadTracker struct{ done chan struct{} }
+type failingReadTracker struct {
+	noopArtifacts
+	done chan struct{}
+}
 
 func (f *failingReadTracker) RecordCacheRead(context.Context, string) error {
 	f.done <- struct{}{}

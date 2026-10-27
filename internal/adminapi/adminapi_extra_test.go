@@ -484,3 +484,33 @@ func TestSpaHandlerServeIndexErrorWhenMissing(t *testing.T) {
 		t.Fatalf("status = %d, want 500 when index.html itself is missing", w.Code)
 	}
 }
+
+func TestDeleteNamespacedCacheEntries(t *testing.T) {
+	h, st, backend := testServer(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	cookie := loginAndGetCookie(t, h, "admin@example.com", "correct-password")
+	ctx := context.Background()
+
+	for _, k := range []string{"nx/abc", "turbo/def"} {
+		if err := backend.Put(ctx, k, bytes.NewReader([]byte("x")), 1); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+
+	w := doJSON(t, h, http.MethodDelete, "/admin/api/cache/nx%2Fabc", nil, cookie, true)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete nx/abc: status = %d, body = %s", w.Code, w.Body)
+	}
+	w = doJSON(t, h, http.MethodPost, "/admin/api/cache/bulk-delete", bulkDeleteRequest{
+		Hashes: []string{"turbo/def"},
+	}, cookie, true)
+	var result deleteCountResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Deleted != 1 {
+		t.Fatalf("bulk delete turbo/def: status = %d, body = %s", w.Code, w.Body)
+	}
+
+	page, err := backend.List(ctx, "", 10)
+	if err != nil || len(page.Entries) != 0 {
+		t.Fatalf("entries left after deletes: %+v, %v", page.Entries, err)
+	}
+}

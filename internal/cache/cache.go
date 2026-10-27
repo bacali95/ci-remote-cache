@@ -14,6 +14,7 @@ import (
 
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/storage"
+	"nx-remote-cache/internal/store"
 )
 
 // ErrUnauthorized means the bearer token is missing, unknown, or revoked.
@@ -25,23 +26,31 @@ var ErrForbidden = errors.New("cache: token lacks required scope")
 // ErrTooLarge is returned by Put when size exceeds the configured maximum.
 var ErrTooLarge = errors.New("cache: artifact exceeds maximum allowed size")
 
-// ReadTracker records cache hits (count + timestamp) for the admin UI and
-// the background janitor's "unread" prune rule. Recording is best-effort
-// and off the request's critical path — see Get.
-type ReadTracker interface {
-	RecordCacheRead(ctx context.Context, hash string) error
+// legacyNamespace owns the bare-hash keys at the storage root, written
+// before keys were namespaced. Reads in this namespace fall back to them;
+// the janitor's max-age rule removes them over time.
+const legacyNamespace = "nx"
+
+// Tracker persists per-artifact rows alongside the storage backend: read
+// activity for the admin UI and the janitor's "unread" prune rule, and
+// client-supplied metadata. Recording is best-effort — a tracking failure
+// never fails a cache request (see Get and Put).
+type Tracker interface {
+	RecordCacheRead(ctx context.Context, key string) error
+	RecordCacheArtifact(ctx context.Context, key string, size int64, meta store.ArtifactMeta) error
+	GetCacheArtifactMeta(ctx context.Context, key string) (store.ArtifactMeta, error)
 }
 
 type Service struct {
 	backend       storage.Backend
 	tokens        *auth.CacheTokenAuth
-	reads         ReadTracker
+	tracker       Tracker
 	log           *slog.Logger
 	maxEntryBytes atomic.Int64
 }
 
-func New(backend storage.Backend, tokens *auth.CacheTokenAuth, reads ReadTracker, log *slog.Logger, maxEntryBytes int64) *Service {
-	s := &Service{backend: backend, tokens: tokens, reads: reads, log: log}
+func New(backend storage.Backend, tokens *auth.CacheTokenAuth, tracker Tracker, log *slog.Logger, maxEntryBytes int64) *Service {
+	s := &Service{backend: backend, tokens: tokens, tracker: tracker, log: log}
 	s.SetMaxEntryBytes(maxEntryBytes)
 	return s
 }
@@ -69,11 +78,16 @@ func (s *Service) Authorize(ctx context.Context, token string, scope auth.Scope)
 	return nil
 }
 
-// Get returns the artifact stored under hash and its size, recording the
-// read on success. Returns storage.ErrNotFound on a miss. Callers must
-// close the reader.
-func (s *Service) Get(ctx context.Context, hash string) (io.ReadCloser, int64, error) {
-	body, size, err := s.backend.Get(ctx, hash)
+// Get returns the artifact stored for hash in namespace and its size,
+// recording the read on success. Returns storage.ErrNotFound on a miss.
+// Callers must close the reader.
+func (s *Service) Get(ctx context.Context, namespace, hash string) (io.ReadCloser, int64, error) {
+	key := storage.Key(namespace, hash)
+	body, size, err := s.backend.Get(ctx, key)
+	if errors.Is(err, storage.ErrNotFound) && namespace == legacyNamespace {
+		key = hash
+		body, size, err = s.backend.Get(ctx, key)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -85,19 +99,37 @@ func (s *Service) Get(ctx context.Context, hash string) (io.ReadCloser, int64, e
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.reads.RecordCacheRead(ctx, hash); err != nil {
-			s.log.Warn("record cache read failed", "hash", hash, "error", err)
+		if err := s.tracker.RecordCacheRead(ctx, key); err != nil {
+			s.log.Warn("record cache read failed", "key", key, "error", err)
 		}
 	}()
 
 	return body, size, nil
 }
 
-// Put stores size bytes from r under hash. Returns ErrTooLarge if size is
-// over the limit, or storage.ErrAlreadyExists if hash is already stored.
-func (s *Service) Put(ctx context.Context, hash string, r io.Reader, size int64) error {
+// Put stores size bytes from r for hash in namespace, along with meta.
+// Returns ErrTooLarge if size is over the limit, or
+// storage.ErrAlreadyExists if the artifact is already stored.
+func (s *Service) Put(ctx context.Context, namespace, hash string, r io.Reader, size int64, meta store.ArtifactMeta) error {
 	if size > s.maxEntryBytes.Load() {
 		return ErrTooLarge
 	}
-	return s.backend.Put(ctx, hash, r, size)
+	key := storage.Key(namespace, hash)
+	if err := s.backend.Put(ctx, key, r, size); err != nil {
+		return err
+	}
+	if err := s.tracker.RecordCacheArtifact(ctx, key, size, meta); err != nil {
+		s.log.Warn("record cache artifact failed", "key", key, "error", err)
+	}
+	return nil
+}
+
+// Meta returns the metadata uploaded with hash in namespace, or the zero
+// value if none was recorded.
+func (s *Service) Meta(ctx context.Context, namespace, hash string) (store.ArtifactMeta, error) {
+	meta, err := s.tracker.GetCacheArtifactMeta(ctx, storage.Key(namespace, hash))
+	if errors.Is(err, store.ErrNotFound) {
+		return store.ArtifactMeta{}, nil
+	}
+	return meta, err
 }

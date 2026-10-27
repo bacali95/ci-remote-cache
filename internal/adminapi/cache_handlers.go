@@ -49,7 +49,7 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 
 	hashes := make([]string, len(page.Entries))
 	for i, e := range page.Entries {
-		hashes[i] = e.Hash
+		hashes[i] = e.Key
 	}
 	readStats, err := s.store.GetCacheReadStatsBatch(r.Context(), hashes)
 	if err != nil {
@@ -61,8 +61,8 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 
 	out := listCacheResponse{NextCursor: page.NextCursor}
 	for _, e := range page.Entries {
-		entry := cacheEntryResponse{Hash: e.Hash, Size: e.Size, ModTime: e.ModTime}
-		if stats, ok := readStats[e.Hash]; ok {
+		entry := cacheEntryResponse{Hash: e.Key, Size: e.Size, ModTime: e.ModTime}
+		if stats, ok := readStats[e.Key]; ok {
 			entry.ReadCount = stats.ReadCount
 			entry.LastReadAt = stats.LastReadAt
 		}
@@ -87,7 +87,7 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 
 func (s *Server) handleDeleteCacheEntry(w http.ResponseWriter, r *http.Request, _ store.User) {
 	hash := r.PathValue("hash")
-	if !storage.ValidHash(hash) {
+	if !storage.ValidKey(hash) {
 		writeError(w, http.StatusBadRequest, "invalid hash")
 		return
 	}
@@ -110,7 +110,7 @@ func (s *Server) handleDeleteCacheEntry(w http.ResponseWriter, r *http.Request, 
 // a failure here must never block or fail the delete that already
 // succeeded against the storage backend.
 func (s *Server) clearReadStats(ctx context.Context, hash string) {
-	if err := s.store.DeleteCacheReadStats(ctx, hash); err != nil {
+	if err := s.store.DeleteCacheArtifact(ctx, hash); err != nil {
 		s.log.Warn("clear cache read stats failed", "hash", hash, "error", err)
 	}
 }
@@ -136,7 +136,7 @@ func (s *Server) handleBulkDelete(w http.ResponseWriter, r *http.Request, _ stor
 
 	deleted := 0
 	for _, h := range req.Hashes {
-		if !storage.ValidHash(h) {
+		if !storage.ValidKey(h) {
 			continue
 		}
 		err := s.backend.Delete(r.Context(), h)
@@ -189,10 +189,10 @@ func (s *Server) pruneOlderThan(ctx context.Context, cutoff time.Time) (int, err
 		}
 		for _, e := range page.Entries {
 			if e.ModTime.Before(cutoff) {
-				if err := s.backend.Delete(ctx, e.Hash); err != nil && !errors.Is(err, storage.ErrNotFound) {
+				if err := s.backend.Delete(ctx, e.Key); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					return deleted, err
 				}
-				s.clearReadStats(ctx, e.Hash)
+				s.clearReadStats(ctx, e.Key)
 				deleted++
 			}
 		}

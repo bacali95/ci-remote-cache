@@ -319,8 +319,8 @@ func TestS3ListWithPrefixAndPagination(t *testing.T) {
 	}
 	// unkey should strip "myprefix/" back off, so hashes come back bare.
 	for _, e := range page1.Entries {
-		if strings.Contains(e.Hash, "myprefix") {
-			t.Fatalf("entry hash %q still has the prefix", e.Hash)
+		if strings.Contains(e.Key, "myprefix") {
+			t.Fatalf("entry hash %q still has the prefix", e.Key)
 		}
 	}
 	if page1.NextCursor == "" {
@@ -349,7 +349,7 @@ func TestS3ListWithoutPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Entries) != 1 || page.Entries[0].Hash != "onlyhash" {
+	if len(page.Entries) != 1 || page.Entries[0].Key != "onlyhash" {
 		t.Fatalf("List = %+v, want one entry for onlyhash", page.Entries)
 	}
 }

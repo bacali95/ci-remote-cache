@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func testSystem(t *testing.T) (baseURL string, st *store.Store) {
 	}
 	t.Cleanup(pool.Close)
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE users, sessions, tokens, cache_reads RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE users, sessions, tokens, cache_artifacts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {
@@ -216,9 +217,9 @@ func (c *adminClient) listCache() []cacheEntry {
 	return out.Entries
 }
 
-func (c *adminClient) deleteCacheEntry(hash string) {
+func (c *adminClient) deleteCacheEntry(key string) {
 	c.t.Helper()
-	resp := c.do(http.MethodDelete, "/admin/api/cache/"+hash, nil, true)
+	resp := c.do(http.MethodDelete, "/admin/api/cache/"+url.PathEscape(key), nil, true)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		c.t.Fatalf("delete cache entry: status = %d", resp.StatusCode)
@@ -283,7 +284,7 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 	}
 
 	// The read is recorded off the request's critical path (see
-	// server.handleGet), so poll instead of asserting immediately.
+	// cache.Service.Get), so poll instead of asserting immediately.
 	var entries []cacheEntry
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -293,8 +294,8 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(entries) != 1 || entries[0].Hash != hash {
-		t.Fatalf("admin cache list = %+v, want one entry for %q", entries, hash)
+	if len(entries) != 1 || entries[0].Hash != "nx/"+hash {
+		t.Fatalf("admin cache list = %+v, want one entry for nx/%s", entries, hash)
 	}
 	if entries[0].ReadCount == 0 {
 		t.Fatalf("admin cache list shows ReadCount = 0, want the earlier GET to have been recorded")
@@ -319,7 +320,7 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	admin.deleteCacheEntry(hash)
+	admin.deleteCacheEntry(entries[0].Hash)
 	if resp := cacheRequest(t, baseURL, http.MethodGet, hash, readTok.Token, nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET after admin delete: status = %d, want 404", resp.StatusCode)
 	} else {

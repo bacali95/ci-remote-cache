@@ -33,16 +33,43 @@ func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (s
 	return tok, nil
 }
 
-// fakeReadTracker returns err from every call and reports each hash on
-// notify, since Get records reads in a goroutine.
+// fakeReadTracker returns err from every call and reports each read key on
+// notify, since Get records reads in a goroutine. Recorded artifact
+// metadata is kept in meta.
 type fakeReadTracker struct {
 	err    error
 	notify chan string
+
+	mu   sync.Mutex
+	meta map[string]store.ArtifactMeta
 }
 
-func (f *fakeReadTracker) RecordCacheRead(_ context.Context, hash string) error {
-	f.notify <- hash
+func (f *fakeReadTracker) RecordCacheRead(_ context.Context, key string) error {
+	f.notify <- key
 	return f.err
+}
+
+func (f *fakeReadTracker) RecordCacheArtifact(_ context.Context, key string, _ int64, meta store.ArtifactMeta) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.meta == nil {
+		f.meta = map[string]store.ArtifactMeta{}
+	}
+	f.meta[key] = meta
+	return f.err
+}
+
+func (f *fakeReadTracker) GetCacheArtifactMeta(_ context.Context, key string) (store.ArtifactMeta, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return store.ArtifactMeta{}, f.err
+	}
+	meta, ok := f.meta[key]
+	if !ok {
+		return store.ArtifactMeta{}, store.ErrNotFound
+	}
+	return meta, nil
 }
 
 // syncBuffer guards a bytes.Buffer that the read-tracking goroutine logs
@@ -64,7 +91,7 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-func newTestService(t *testing.T, reads ReadTracker, logOut io.Writer) *Service {
+func newTestService(t *testing.T, reads Tracker, logOut io.Writer) *Service {
 	t.Helper()
 	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
@@ -129,10 +156,10 @@ func TestPutThenGetRecordsRead(t *testing.T) {
 	svc := newTestService(t, reads, io.Discard)
 	ctx := context.Background()
 
-	if err := svc.Put(ctx, "abc", strings.NewReader("data"), 4); err != nil {
+	if err := svc.Put(ctx, "ns", "abc", strings.NewReader("data"), 4, store.ArtifactMeta{}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	body, size, err := svc.Get(ctx, "abc")
+	body, size, err := svc.Get(ctx, "ns", "abc")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -141,8 +168,8 @@ func TestPutThenGetRecordsRead(t *testing.T) {
 	if string(got) != "data" || size != 4 {
 		t.Fatalf("Get = %q (size %d), want \"data\" (size 4)", got, size)
 	}
-	if hash := waitForRead(t, reads); hash != "abc" {
-		t.Fatalf("recorded read for %q, want abc", hash)
+	if key := waitForRead(t, reads); key != "ns/abc" {
+		t.Fatalf("recorded read for %q, want ns/abc", key)
 	}
 }
 
@@ -150,7 +177,7 @@ func TestGetMissDoesNotRecordRead(t *testing.T) {
 	reads := &fakeReadTracker{notify: make(chan string, 1)}
 	svc := newTestService(t, reads, io.Discard)
 
-	if _, _, err := svc.Get(context.Background(), "missing"); !errors.Is(err, storage.ErrNotFound) {
+	if _, _, err := svc.Get(context.Background(), "ns", "missing"); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("Get miss err = %v, want storage.ErrNotFound", err)
 	}
 	select {
@@ -166,10 +193,10 @@ func TestGetLogsReadTrackingFailure(t *testing.T) {
 	svc := newTestService(t, reads, &logs)
 	ctx := context.Background()
 
-	if err := svc.Put(ctx, "abc", strings.NewReader("x"), 1); err != nil {
+	if err := svc.Put(ctx, "ns", "abc", strings.NewReader("x"), 1, store.ArtifactMeta{}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	body, _, err := svc.Get(ctx, "abc")
+	body, _, err := svc.Get(ctx, "ns", "abc")
 	if err != nil {
 		t.Fatalf("Get must succeed even if read tracking fails: %v", err)
 	}
@@ -189,14 +216,78 @@ func TestPutEnforcesMaxEntryBytes(t *testing.T) {
 	svc := newTestService(t, &fakeReadTracker{notify: make(chan string, 1)}, io.Discard)
 	ctx := context.Background()
 
-	if err := svc.Put(ctx, "big", strings.NewReader("12345678901"), 11); !errors.Is(err, ErrTooLarge) {
+	if err := svc.Put(ctx, "ns", "big", strings.NewReader("12345678901"), 11, store.ArtifactMeta{}); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("Put over limit err = %v, want ErrTooLarge", err)
 	}
 	svc.SetMaxEntryBytes(20)
-	if err := svc.Put(ctx, "big", strings.NewReader("12345678901"), 11); err != nil {
+	if err := svc.Put(ctx, "ns", "big", strings.NewReader("12345678901"), 11, store.ArtifactMeta{}); err != nil {
 		t.Fatalf("Put after raising limit: %v", err)
 	}
-	if err := svc.Put(ctx, "big", strings.NewReader("again"), 5); !errors.Is(err, storage.ErrAlreadyExists) {
+	if err := svc.Put(ctx, "ns", "big", strings.NewReader("again"), 5, store.ArtifactMeta{}); !errors.Is(err, storage.ErrAlreadyExists) {
 		t.Fatalf("duplicate Put err = %v, want storage.ErrAlreadyExists", err)
+	}
+}
+
+func TestGetFallsBackToLegacyRootKeyForNxOnly(t *testing.T) {
+	backend, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	ctx := context.Background()
+	if err := backend.Put(ctx, "old", strings.NewReader("legacy"), 6); err != nil {
+		t.Fatalf("seed legacy key: %v", err)
+	}
+	reads := &fakeReadTracker{notify: make(chan string, 1)}
+	svc := New(backend, nil, reads, slog.New(slog.NewTextHandler(io.Discard, nil)), 10)
+
+	body, _, err := svc.Get(ctx, "nx", "old")
+	if err != nil {
+		t.Fatalf("Get legacy nx entry: %v", err)
+	}
+	got, _ := io.ReadAll(body)
+	_ = body.Close()
+	if string(got) != "legacy" {
+		t.Fatalf("Get = %q, want legacy", got)
+	}
+	if key := waitForRead(t, reads); key != "old" {
+		t.Fatalf("recorded read for %q, want the legacy key old", key)
+	}
+
+	if _, _, err := svc.Get(ctx, "turbo", "old"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Get legacy key via turbo err = %v, want storage.ErrNotFound", err)
+	}
+}
+
+func TestPutRecordsMetaReturnedByMeta(t *testing.T) {
+	svc := newTestService(t, &fakeReadTracker{notify: make(chan string, 1)}, io.Discard)
+	ctx := context.Background()
+	want := store.ArtifactMeta{DurationMs: 7, Tag: "sig"}
+
+	if err := svc.Put(ctx, "turbo", "abc", strings.NewReader("x"), 1, want); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	got, err := svc.Meta(ctx, "turbo", "abc")
+	if err != nil || got != want {
+		t.Fatalf("Meta = %+v, %v; want %+v, nil", got, err, want)
+	}
+	got, err = svc.Meta(ctx, "turbo", "unknown")
+	if err != nil || got != (store.ArtifactMeta{}) {
+		t.Fatalf("Meta(unknown) = %+v, %v; want zero value, nil", got, err)
+	}
+}
+
+func TestPutSucceedsAndMetaErrorsWhenTrackerFails(t *testing.T) {
+	var logs syncBuffer
+	svc := newTestService(t, &fakeReadTracker{err: errors.New("db down"), notify: make(chan string, 1)}, &logs)
+	ctx := context.Background()
+
+	if err := svc.Put(ctx, "turbo", "abc", strings.NewReader("x"), 1, store.ArtifactMeta{}); err != nil {
+		t.Fatalf("Put must succeed even if recording the artifact fails: %v", err)
+	}
+	if !strings.Contains(logs.String(), "record cache artifact failed") {
+		t.Fatalf("expected an artifact-recording warning, logs: %s", logs.String())
+	}
+	if _, err := svc.Meta(ctx, "turbo", "abc"); err == nil {
+		t.Fatal("Meta err = nil, want the tracker's error")
 	}
 }

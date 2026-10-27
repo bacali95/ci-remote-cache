@@ -140,7 +140,7 @@ func (g *GCS) List(ctx context.Context, cursor string, limit int) (ListPage, err
 	page := ListPage{NextCursor: nextToken}
 	for _, obj := range objs {
 		page.Entries = append(page.Entries, Entry{
-			Hash:    g.unkey(obj.Name),
+			Key:     g.unkey(obj.Name),
 			Size:    obj.Size,
 			ModTime: obj.Updated,
 		})

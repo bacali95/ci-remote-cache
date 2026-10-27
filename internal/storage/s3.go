@@ -176,7 +176,7 @@ func (s *S3) List(ctx context.Context, cursor string, limit int) (ListPage, erro
 		if obj.Key == nil {
 			continue
 		}
-		entry := Entry{Hash: s.unkey(*obj.Key)}
+		entry := Entry{Key: s.unkey(*obj.Key)}
 		if obj.Size != nil {
 			entry.Size = *obj.Size
 		}

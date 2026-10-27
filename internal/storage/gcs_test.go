@@ -425,8 +425,8 @@ func TestGCSListWithPrefixAndPagination(t *testing.T) {
 		t.Fatalf("page1 entries = %d, want 2", len(page1.Entries))
 	}
 	for _, e := range page1.Entries {
-		if strings.Contains(e.Hash, "myprefix") {
-			t.Fatalf("entry hash %q still has the prefix", e.Hash)
+		if strings.Contains(e.Key, "myprefix") {
+			t.Fatalf("entry hash %q still has the prefix", e.Key)
 		}
 	}
 	if page1.NextCursor == "" {
@@ -452,7 +452,7 @@ func TestGCSListWithoutPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Entries) != 1 || page.Entries[0].Hash != "onlyhash" {
+	if len(page.Entries) != 1 || page.Entries[0].Key != "onlyhash" {
 		t.Fatalf("List = %+v, want one entry for onlyhash", page.Entries)
 	}
 }

@@ -32,7 +32,7 @@ func (f *fakeReadStats) ListAllCacheReadStats(context.Context) (map[string]store
 	return f.stats, nil
 }
 
-func (f *fakeReadStats) DeleteCacheReadStats(_ context.Context, hash string) error {
+func (f *fakeReadStats) DeleteCacheArtifact(_ context.Context, hash string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
@@ -86,7 +86,7 @@ func (f *fakeBackend) List(_ context.Context, cursor string, _ int) (storage.Lis
 	return storage.ListPage{}, nil
 }
 
-var oldEntry = storage.Entry{Hash: "old", ModTime: time.Now().Add(-100 * 24 * time.Hour)}
+var oldEntry = storage.Entry{Key: "old", ModTime: time.Now().Add(-100 * 24 * time.Hour)}
 
 func TestSweepReturnsErrorWhenReadStatsFail(t *testing.T) {
 	boom := errors.New("boom")
@@ -155,8 +155,8 @@ func TestSweepWarnsAndContinuesWhenClearReadStatsFails(t *testing.T) {
 }
 
 func TestSweepPaginatesAcrossMultiplePages(t *testing.T) {
-	page1 := storage.ListPage{Entries: []storage.Entry{{Hash: "old1", ModTime: oldEntry.ModTime}}, NextCursor: "old1"}
-	page2 := storage.ListPage{Entries: []storage.Entry{{Hash: "old2", ModTime: oldEntry.ModTime}}}
+	page1 := storage.ListPage{Entries: []storage.Entry{{Key: "old1", ModTime: oldEntry.ModTime}}, NextCursor: "old1"}
+	page2 := storage.ListPage{Entries: []storage.Entry{{Key: "old2", ModTime: oldEntry.ModTime}}}
 	backend := &fakeBackend{pages: []storage.ListPage{page1, page2}}
 	j := New(backend, &fakeReadStats{stats: map[string]store.CacheReadStats{}}, testLoggerExtra(), Config{MaxAge: time.Hour, UnreadAfter: time.Hour, Interval: time.Hour})
 

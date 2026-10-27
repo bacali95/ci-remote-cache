@@ -33,8 +33,8 @@ func newTestFixture(t *testing.T) (*storage.Local, *store.Store, *pgxpool.Pool) 
 		t.Fatalf("pgxpool.New: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), `TRUNCATE cache_reads`); err != nil {
-		t.Fatalf("truncate cache_reads: %v", err)
+	if _, err := pool.Exec(context.Background(), `TRUNCATE cache_artifacts`); err != nil {
+		t.Fatalf("truncate cache_artifacts: %v", err)
 	}
 
 	backend, err := storage.NewLocal(t.TempDir())
@@ -63,14 +63,14 @@ func seedRead(t *testing.T, pool *pgxpool.Pool, hash string, ago time.Duration) 
 	t.Helper()
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO cache_reads (hash, read_count, last_read_at) VALUES ($1, 1, now())
-		ON CONFLICT (hash) DO UPDATE SET read_count = cache_reads.read_count + 1, last_read_at = now()
+		INSERT INTO cache_artifacts (key, read_count, last_read_at) VALUES ($1, 1, now())
+		ON CONFLICT (key) DO UPDATE SET read_count = cache_artifacts.read_count + 1, last_read_at = now()
 	`, hash); err != nil {
 		t.Fatalf("seed read for %s: %v", hash, err)
 	}
 	if ago > 0 {
 		when := time.Now().Add(-ago)
-		if _, err := pool.Exec(ctx, `UPDATE cache_reads SET last_read_at = $1 WHERE hash = $2`, when, hash); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE cache_artifacts SET last_read_at = $1 WHERE key = $2`, when, hash); err != nil {
 			t.Fatalf("backdate read for %s: %v", hash, err)
 		}
 	}

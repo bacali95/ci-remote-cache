@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -50,15 +51,15 @@ func TestGetCacheReadStatsBatchOmitsUnknownHashes(t *testing.T) {
 	}
 }
 
-func TestDeleteCacheReadStats(t *testing.T) {
+func TestDeleteCacheArtifact(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
 	if err := s.RecordCacheRead(ctx, "hash1"); err != nil {
 		t.Fatalf("RecordCacheRead: %v", err)
 	}
-	if err := s.DeleteCacheReadStats(ctx, "hash1"); err != nil {
-		t.Fatalf("DeleteCacheReadStats: %v", err)
+	if err := s.DeleteCacheArtifact(ctx, "hash1"); err != nil {
+		t.Fatalf("DeleteCacheArtifact: %v", err)
 	}
 	batch, err := s.GetCacheReadStatsBatch(ctx, []string{"hash1"})
 	if err != nil {
@@ -99,4 +100,55 @@ func mustBatch(t *testing.T, s *Store, hash string) CacheReadStats {
 		t.Fatalf("no stats found for %q", hash)
 	}
 	return stats
+}
+
+func TestRecordCacheArtifactRoundtripsMetaAndKeepsReads(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.RecordCacheRead(ctx, "turbo/abc"); err != nil {
+		t.Fatalf("RecordCacheRead: %v", err)
+	}
+	want := ArtifactMeta{DurationMs: 1234, Tag: "sig", SHA: "deadbeef", DirtyHash: "d1"}
+	if err := s.RecordCacheArtifact(ctx, "turbo/abc", 42, want); err != nil {
+		t.Fatalf("RecordCacheArtifact: %v", err)
+	}
+
+	got, err := s.GetCacheArtifactMeta(ctx, "turbo/abc")
+	if err != nil {
+		t.Fatalf("GetCacheArtifactMeta: %v", err)
+	}
+	if got != want {
+		t.Fatalf("GetCacheArtifactMeta = %+v, want %+v", got, want)
+	}
+	if stats := mustBatch(t, s, "turbo/abc"); stats.ReadCount != 1 {
+		t.Fatalf("ReadCount = %d after recording metadata, want 1 preserved", stats.ReadCount)
+	}
+}
+
+func TestGetCacheArtifactMetaMissing(t *testing.T) {
+	_, err := newTestStore(t).GetCacheArtifactMeta(context.Background(), "nx/missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUploadedButUnreadArtifactsAreNotReadStats(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.RecordCacheArtifact(ctx, "nx/unread", 1, ArtifactMeta{}); err != nil {
+		t.Fatalf("RecordCacheArtifact: %v", err)
+	}
+	batch, err := s.GetCacheReadStatsBatch(ctx, []string{"nx/unread"})
+	if err != nil {
+		t.Fatalf("GetCacheReadStatsBatch: %v", err)
+	}
+	all, err := s.ListAllCacheReadStats(ctx)
+	if err != nil {
+		t.Fatalf("ListAllCacheReadStats: %v", err)
+	}
+	if len(batch) != 0 || len(all) != 0 {
+		t.Fatalf("unread artifact reported as read: batch=%v all=%v", batch, all)
+	}
 }
