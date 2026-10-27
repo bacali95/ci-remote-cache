@@ -1,5 +1,6 @@
-// Command server runs an Nx self-hosted remote cache server:
-// https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server
+// Command server runs a self-hosted remote cache server for Nx
+// (https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server)
+// and Turborepo (https://turborepo.dev/api/remote-cache-spec) side by side,
 // alongside an embedded admin UI for browsing/pruning the cache and
 // managing users, access tokens, and runtime settings (storage backend,
 // session TTL, max cache entry size — all live in Postgres and are
@@ -17,17 +18,20 @@ import (
 	"syscall"
 	"time"
 
-	"nx-remote-cache/internal/adminapi"
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/config"
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/janitor"
-	"nx-remote-cache/internal/server"
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
-	webui "nx-remote-cache/web"
+	"ci-remote-cache/internal/adminapi"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/cache"
+	"ci-remote-cache/internal/config"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/janitor"
+	"ci-remote-cache/internal/protocol"
+	"ci-remote-cache/internal/protocol/nx"
+	"ci-remote-cache/internal/protocol/turbo"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
+	webui "ci-remote-cache/web"
 )
 
 // Background cleanup thresholds (see internal/janitor for the exact
@@ -108,14 +112,14 @@ func run(log *slog.Logger) error {
 
 	// The storage backend, session TTL, and max entry size are runtime
 	// settings (internal/settings) rather than fixed at startup: dynBackend
-	// is a swappable indirection both servers hold onto, and
-	// settingsMgr.Load populates it (plus the session/server atomics) from
-	// whatever's currently in Postgres before either server starts
+	// is a swappable indirection both the cache core and the admin API hold
+	// onto, and settingsMgr.Load populates it (plus the session/cache
+	// atomics) from whatever's currently in Postgres before either starts
 	// accepting requests.
 	dynBackend := storage.NewDynamic(nil)
 	sessions := session.NewManager(st, 0)
-	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
-	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, dataSrv)
+	cacheSvc := cache.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
+	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, cacheSvc)
 	if err := settingsMgr.Load(ctx); err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
@@ -133,9 +137,8 @@ func run(log *slog.Logger) error {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
-	mux.Handle("/v1/", dataSrv.Handler())
-	mux.Handle("/health", dataSrv.Handler())
 	mux.Handle("/admin/", adminSrv.Handler())
+	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log), turbo.New(cacheSvc, log)))
 
 	httpServer := &http.Server{
 		Addr:         cfg.Addr,

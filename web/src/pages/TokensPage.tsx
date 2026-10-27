@@ -4,6 +4,8 @@ import { api, type Token } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ConnectSnippet } from "@/components/ConnectSnippet"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -104,8 +106,8 @@ export function TokensPage() {
                 <DialogHeader>
                   <DialogTitle>Token created</DialogTitle>
                   <DialogDescription>
-                    Copy this now — it won't be shown again. Set it as{" "}
-                    <code className="text-xs">NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN</code>.
+                    Copy this now — it won't be shown again. Store it as a CI secret and expose it
+                    to your builds like this:
                   </DialogDescription>
                 </DialogHeader>
                 <Input
@@ -114,6 +116,7 @@ export function TokensPage() {
                   onFocus={(e) => e.target.select()}
                   className="font-mono text-sm"
                 />
+                <ConnectSnippet token={freshToken} />
                 <DialogFooter>
                   <Button onClick={() => setCreateOpen(false)}>Done</Button>
                 </DialogFooter>
@@ -169,6 +172,19 @@ export function TokensPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Connect a repository</CardTitle>
+          <CardDescription>
+            Set these in your CI job, with a token from below. Nx and Turborepo share the same
+            tokens.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ConnectSnippet />
+        </CardContent>
+      </Card>
 
       <Table>
         <TableHeader>

@@ -97,7 +97,7 @@ func TestListFailsWhenDirRemoved(t *testing.T) {
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("RemoveAll: %v", err)
 	}
-	if _, err := l.List(ctx, "", 10); err == nil {
+	if _, err := l.List(ctx, "", "", 10); err == nil {
 		t.Fatal("expected List to fail once its directory is gone")
 	}
 }

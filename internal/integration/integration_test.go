@@ -1,7 +1,8 @@
-// Package integration wires the data-plane server (internal/server) and the
-// admin API (internal/adminapi) together exactly like cmd/server/main.go
-// does, then drives the whole system over real HTTP. Neither package's own
-// tests do this: internal/server fakes token auth, internal/adminapi never
+// Package integration wires the data plane (internal/cache plus the
+// internal/protocol adapters) and the admin API (internal/adminapi)
+// together exactly like cmd/server/main.go does, then drives the whole
+// system over real HTTP. Neither side's own tests do this: the protocol
+// tests fake token auth, internal/adminapi never
 // touches the data plane, so a token minted by the admin API and a request
 // against /v1/cache have never actually been exercised together before.
 package integration
@@ -18,23 +19,28 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/adminapi"
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/server"
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/adminapi"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/cache"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/protocol"
+	"ci-remote-cache/internal/protocol/nx"
+	"ci-remote-cache/internal/protocol/turbo"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const csrfHeader = "X-Nxcache-Admin"
+const csrfHeader = "X-CI-Cache-Admin"
 
 // testSystem boots the full app (data-plane + admin API, sharing one store,
 // one dynamic storage backend, one settings manager) against a real
@@ -55,7 +61,7 @@ func testSystem(t *testing.T) (baseURL string, st *store.Store) {
 	}
 	t.Cleanup(pool.Close)
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE users, sessions, tokens, cache_reads RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE users, sessions, tokens, cache_artifacts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {
@@ -81,17 +87,16 @@ func testSystem(t *testing.T) (baseURL string, st *store.Store) {
 
 	dynBackend := storage.NewDynamic(nil)
 	sessions := session.NewManager(st, time.Hour)
-	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
-	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, dataSrv)
+	cacheSvc := cache.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
+	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, cacheSvc)
 	if err := settingsMgr.Load(context.Background()); err != nil {
 		t.Fatalf("settings Load: %v", err)
 	}
 	adminSrv := adminapi.New(st, sessions, dynBackend, settingsMgr, log, false, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", dataSrv.Handler())
-	mux.Handle("/health", dataSrv.Handler())
 	mux.Handle("/admin/", adminSrv.Handler())
+	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log), turbo.New(cacheSvc, log)))
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -198,6 +203,8 @@ func (c *adminClient) revokeToken(id int64) {
 }
 
 type cacheEntry struct {
+	Key       string `json:"key"`
+	Protocol  string `json:"protocol"`
 	Hash      string `json:"hash"`
 	ReadCount int64  `json:"readCount"`
 }
@@ -214,9 +221,9 @@ func (c *adminClient) listCache() []cacheEntry {
 	return out.Entries
 }
 
-func (c *adminClient) deleteCacheEntry(hash string) {
+func (c *adminClient) deleteCacheEntry(key string) {
 	c.t.Helper()
-	resp := c.do(http.MethodDelete, "/admin/api/cache/"+hash, nil, true)
+	resp := c.do(http.MethodDelete, "/admin/api/cache/"+url.PathEscape(key), nil, true)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		c.t.Fatalf("delete cache entry: status = %d", resp.StatusCode)
@@ -281,7 +288,7 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 	}
 
 	// The read is recorded off the request's critical path (see
-	// server.handleGet), so poll instead of asserting immediately.
+	// cache.Service.Get), so poll instead of asserting immediately.
 	var entries []cacheEntry
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -291,8 +298,8 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(entries) != 1 || entries[0].Hash != hash {
-		t.Fatalf("admin cache list = %+v, want one entry for %q", entries, hash)
+	if len(entries) != 1 || entries[0].Key != "nx/"+hash {
+		t.Fatalf("admin cache list = %+v, want one entry for nx/%s", entries, hash)
 	}
 	if entries[0].ReadCount == 0 {
 		t.Fatalf("admin cache list shows ReadCount = 0, want the earlier GET to have been recorded")
@@ -317,10 +324,94 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	admin.deleteCacheEntry(hash)
+	admin.deleteCacheEntry(entries[0].Key)
 	if resp := cacheRequest(t, baseURL, http.MethodGet, hash, readTok.Token, nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET after admin delete: status = %d, want 404", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
+	}
+}
+
+// TestNxAndTurboShareTokensButNotArtifacts runs both clients against one
+// server: a single admin-minted token works for both, the same hash
+// uploaded by each lands in separate namespaces, and Turborepo's
+// x-artifact-* metadata round-trips through Postgres.
+func TestNxAndTurboShareTokensButNotArtifacts(t *testing.T) {
+	baseURL, st := testSystem(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	admin := newAdminClient(t, baseURL)
+	admin.login("admin@example.com", "correct-password")
+	tok := admin.createToken("ci", "write").Token
+
+	const hash = "abc123def456"
+	if resp := cacheRequest(t, baseURL, http.MethodPut, hash, tok, []byte("nx-artifact")); resp.StatusCode != http.StatusOK {
+		t.Fatalf("nx PUT: status = %d", resp.StatusCode)
+	} else {
+		_ = resp.Body.Close()
+	}
+
+	turbo := func(method string, body []byte, headers map[string]string) *http.Response {
+		t.Helper()
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		req, err := http.NewRequest(method, baseURL+"/v8/artifacts/"+hash+"?slug=team", reqBody)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("turbo %s: %v", method, err)
+		}
+		return resp
+	}
+
+	if resp := turbo(http.MethodGet, nil, nil); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("turbo GET before upload: status = %d, want 404 (nx artifact must not leak)", resp.StatusCode)
+	} else {
+		_ = resp.Body.Close()
+	}
+
+	resp := turbo(http.MethodPut, []byte("turbo-artifact"), map[string]string{
+		"x-artifact-duration": "250",
+		"x-artifact-tag":      "dGFn",
+	})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("turbo PUT: status = %d, want 202", resp.StatusCode)
+	}
+
+	resp = turbo(http.MethodGet, nil, nil)
+	got, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(got) != "turbo-artifact" {
+		t.Fatalf("turbo GET = %d %q, want 200 turbo-artifact", resp.StatusCode, got)
+	}
+	if tag, dur := resp.Header.Get("x-artifact-tag"), resp.Header.Get("x-artifact-duration"); tag != "dGFn" || dur != "250" {
+		t.Fatalf("turbo GET metadata = tag %q, duration %q; want dGFn, 250", tag, dur)
+	}
+
+	nxResp := cacheRequest(t, baseURL, http.MethodGet, hash, tok, nil)
+	got, _ = io.ReadAll(nxResp.Body)
+	_ = nxResp.Body.Close()
+	if string(got) != "nx-artifact" {
+		t.Fatalf("nx GET = %q, want nx-artifact unaffected by the turbo upload", got)
+	}
+
+	var keys []string
+	for _, e := range admin.listCache() {
+		if e.Hash != hash {
+			t.Errorf("admin entry %s has hash %q, want %q", e.Key, e.Hash, hash)
+		}
+		keys = append(keys, e.Protocol+"/"+e.Hash)
+	}
+	slices.Sort(keys)
+	if want := []string{"nx/" + hash, "turbo/" + hash}; !slices.Equal(keys, want) {
+		t.Fatalf("admin cache keys = %v, want %v", keys, want)
 	}
 }

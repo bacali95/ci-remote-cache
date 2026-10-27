@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -92,7 +92,7 @@ func TestLoadAppliesSeededDefaults(t *testing.T) {
 	}
 
 	// The Dynamic backend should now be usable (backed by a real local dir).
-	if _, err := dyn.List(ctx, "", 1); err != nil {
+	if _, err := dyn.List(ctx, "", "", 1); err != nil {
 		t.Fatalf("backend from Load should work: %v", err)
 	}
 }
@@ -188,7 +188,7 @@ func TestApplyRejectsInvalidSettingsWithoutSwapping(t *testing.T) {
 	if after != before {
 		t.Fatalf("Current() changed after a rejected Apply: before=%+v after=%+v", before, after)
 	}
-	if _, err := dyn.List(ctx, "", 1); err != nil {
+	if _, err := dyn.List(ctx, "", "", 1); err != nil {
 		t.Fatalf("backend should still be the original working one: %v", err)
 	}
 
@@ -218,7 +218,7 @@ func TestApplyRejectsUnreachableS3WithoutSwapping(t *testing.T) {
 	badSecret := "not-a-real-secret"
 	_, err := m.Apply(ctx, ApplyInput{
 		StorageBackend:     store.StorageS3,
-		S3Bucket:           "definitely-does-not-exist-nx-remote-cache-test",
+		S3Bucket:           "definitely-does-not-exist-ci-remote-cache-test",
 		S3Region:           "us-east-1",
 		S3AccessKeyID:      &badKey,
 		S3SecretAccessKey:  &badSecret,
@@ -230,7 +230,7 @@ func TestApplyRejectsUnreachableS3WithoutSwapping(t *testing.T) {
 		t.Fatalf("Apply against unreachable S3: err = %v, want ErrInvalidSettings", err)
 	}
 
-	if _, err := dyn.List(ctx, "", 1); err != nil {
+	if _, err := dyn.List(ctx, "", "", 1); err != nil {
 		t.Fatalf("backend should still be the original local one, not swapped to broken s3: %v", err)
 	}
 }

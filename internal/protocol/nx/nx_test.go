@@ -1,4 +1,4 @@
-package server
+package nx
 
 import (
 	"bytes"
@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/cache"
+	"ci-remote-cache/internal/protocol"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 const (
@@ -37,10 +39,27 @@ func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (s
 	return tok, nil
 }
 
-// fakeReadTracker satisfies server.ReadTracker without Postgres. notify
+// noopArtifacts supplies the cache.Tracker methods the Nx adapter never
+// depends on: Nx uploads carry no metadata.
+type noopArtifacts struct{}
+
+func (noopArtifacts) RecordCacheArtifact(context.Context, string, int64, store.ArtifactMeta) error {
+	return nil
+}
+
+func (noopArtifacts) GetCacheArtifactInfoBatch(context.Context, []string) (map[string]store.ArtifactInfo, error) {
+	return nil, nil
+}
+
+func (noopArtifacts) GetCacheArtifactMeta(context.Context, string) (store.ArtifactMeta, error) {
+	return store.ArtifactMeta{}, store.ErrNotFound
+}
+
+// fakeReadTracker satisfies cache.Tracker without Postgres. notify
 // lets a test block until an async RecordCacheRead call actually lands,
-// since handleGet fires it in a goroutine.
+// since cache.Service.Get fires it in a goroutine.
 type fakeReadTracker struct {
+	noopArtifacts
 	mu     sync.Mutex
 	calls  []string
 	notify chan string
@@ -58,13 +77,29 @@ func (f *fakeReadTracker) RecordCacheRead(_ context.Context, hash string) error 
 	return nil
 }
 
-func newTestServer(t *testing.T) *Server {
+// testServer pairs the cache core with the Nx routes mounted the way
+// cmd/server mounts them, so tests can both send requests and change the
+// size limit.
+type testServer struct {
+	*cache.Service
+	handler http.Handler
+}
+
+func (s *testServer) Handler() http.Handler { return s.handler }
+
+func newServer(backend storage.Backend, tokens *auth.CacheTokenAuth, reads cache.Tracker) *testServer {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := cache.New(backend, tokens, reads, log, 10*1024*1024)
+	return &testServer{Service: svc, handler: protocol.Handler(log, New(svc, log))}
+}
+
+func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 	srv, _ := newTestServerWithReads(t)
 	return srv
 }
 
-func newTestServerWithReads(t *testing.T) (*Server, *fakeReadTracker) {
+func newTestServerWithReads(t *testing.T) (*testServer, *fakeReadTracker) {
 	t.Helper()
 	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
@@ -76,8 +111,7 @@ func newTestServerWithReads(t *testing.T) (*Server, *fakeReadTracker) {
 	}}
 	tokens := auth.NewCacheTokenAuth(fake)
 	reads := newFakeReadTracker()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(backend, tokens, reads, log, 10*1024*1024), reads
+	return newServer(backend, tokens, reads), reads
 }
 
 func doRequest(t *testing.T, h http.Handler, method, path, token string, body []byte) *httptest.ResponseRecorder {
@@ -130,8 +164,8 @@ func TestGetHitRecordsReadButMissDoesNot(t *testing.T) {
 	}
 	select {
 	case hash := <-reads.notify:
-		if hash != "abc123" {
-			t.Fatalf("recorded read for %q, want abc123", hash)
+		if hash != "nx/abc123" {
+			t.Fatalf("recorded read for %q, want nx/abc123", hash)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RecordCacheRead was not called within 2s of a cache hit")
@@ -254,13 +288,5 @@ func TestInvalidHashRejected(t *testing.T) {
 	resp := doRequest(t, h, http.MethodGet, "/v1/cache/abc%2e%2e%24def", readToken, nil)
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for hash with disallowed characters", resp.Code)
-	}
-}
-
-func TestHealthNoAuth(t *testing.T) {
-	h := newTestServer(t).Handler()
-	resp := doRequest(t, h, http.MethodGet, "/health", "", nil)
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.Code)
 	}
 }

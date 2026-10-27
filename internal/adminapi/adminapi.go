@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"nx-remote-cache/internal/httplog"
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/httplog"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 type Server struct {
@@ -57,7 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/tokens/{id}", s.protected(s.handleRevokeToken))
 
 	mux.HandleFunc("GET /admin/api/cache", s.protected(s.handleListCache))
-	mux.HandleFunc("DELETE /admin/api/cache/{hash}", s.protected(s.handleDeleteCacheEntry))
+	mux.HandleFunc("DELETE /admin/api/cache/{key}", s.protected(s.handleDeleteCacheEntry))
 	mux.HandleFunc("POST /admin/api/cache/bulk-delete", s.protected(s.handleBulkDelete))
 	mux.HandleFunc("POST /admin/api/cache/prune", s.protected(s.handlePrune))
 

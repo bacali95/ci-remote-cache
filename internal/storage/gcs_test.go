@@ -331,7 +331,7 @@ func TestGCSDeleteSurfacesUnexpectedError(t *testing.T) {
 
 func TestGCSListSurfacesUnexpectedError(t *testing.T) {
 	g := newBrokenTestGCS(t)
-	if _, err := g.List(brokenTestCtx(t), "", 10); err == nil {
+	if _, err := g.List(brokenTestCtx(t), "", "", 10); err == nil {
 		t.Fatal("expected an error from a 500 response")
 	}
 }
@@ -417,7 +417,7 @@ func TestGCSListWithPrefixAndPagination(t *testing.T) {
 		}
 	}
 
-	page1, err := g.List(ctx, "", 2)
+	page1, err := g.List(ctx, "", "", 2)
 	if err != nil {
 		t.Fatalf("List page1: %v", err)
 	}
@@ -425,15 +425,15 @@ func TestGCSListWithPrefixAndPagination(t *testing.T) {
 		t.Fatalf("page1 entries = %d, want 2", len(page1.Entries))
 	}
 	for _, e := range page1.Entries {
-		if strings.Contains(e.Hash, "myprefix") {
-			t.Fatalf("entry hash %q still has the prefix", e.Hash)
+		if strings.Contains(e.Key, "myprefix") {
+			t.Fatalf("entry hash %q still has the prefix", e.Key)
 		}
 	}
 	if page1.NextCursor == "" {
 		t.Fatal("expected a NextCursor for a truncated page")
 	}
 
-	page2, err := g.List(ctx, page1.NextCursor, 2)
+	page2, err := g.List(ctx, "", page1.NextCursor, 2)
 	if err != nil {
 		t.Fatalf("List page2: %v", err)
 	}
@@ -448,11 +448,11 @@ func TestGCSListWithoutPrefix(t *testing.T) {
 	if err := g.Put(ctx, "onlyhash", bytes.NewReader([]byte("x")), 1); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	page, err := g.List(ctx, "", 10)
+	page, err := g.List(ctx, "", "", 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Entries) != 1 || page.Entries[0].Hash != "onlyhash" {
+	if len(page.Entries) != 1 || page.Entries[0].Key != "onlyhash" {
 		t.Fatalf("List = %+v, want one entry for onlyhash", page.Entries)
 	}
 }
@@ -487,4 +487,9 @@ func TestIsPreconditionFailed(t *testing.T) {
 	if isPreconditionFailed(errors.New("some other error")) {
 		t.Error("isPreconditionFailed(generic error) = true, want false")
 	}
+}
+
+func TestGCSListByKeyPrefix(t *testing.T) {
+	t.Run("no bucket prefix", func(t *testing.T) { testListByKeyPrefix(t, newTestGCS(t, "")) })
+	t.Run("bucket prefix", func(t *testing.T) { testListByKeyPrefix(t, newTestGCS(t, "myprefix")) })
 }

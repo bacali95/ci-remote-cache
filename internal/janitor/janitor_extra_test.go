@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 func testLoggerExtra() *slog.Logger {
@@ -32,7 +32,7 @@ func (f *fakeReadStats) ListAllCacheReadStats(context.Context) (map[string]store
 	return f.stats, nil
 }
 
-func (f *fakeReadStats) DeleteCacheReadStats(_ context.Context, hash string) error {
+func (f *fakeReadStats) DeleteCacheArtifact(_ context.Context, hash string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
@@ -68,7 +68,7 @@ func (f *fakeBackend) Delete(_ context.Context, hash string) error {
 // the first page, and any other cursor returns the page right after the
 // one whose NextCursor matches it — enough to simulate real pagination
 // without needing a real backend.
-func (f *fakeBackend) List(_ context.Context, cursor string, _ int) (storage.ListPage, error) {
+func (f *fakeBackend) List(_ context.Context, _, cursor string, _ int) (storage.ListPage, error) {
 	if f.listErr != nil {
 		return storage.ListPage{}, f.listErr
 	}
@@ -86,7 +86,7 @@ func (f *fakeBackend) List(_ context.Context, cursor string, _ int) (storage.Lis
 	return storage.ListPage{}, nil
 }
 
-var oldEntry = storage.Entry{Hash: "old", ModTime: time.Now().Add(-100 * 24 * time.Hour)}
+var oldEntry = storage.Entry{Key: "old", ModTime: time.Now().Add(-100 * 24 * time.Hour)}
 
 func TestSweepReturnsErrorWhenReadStatsFail(t *testing.T) {
 	boom := errors.New("boom")
@@ -155,8 +155,8 @@ func TestSweepWarnsAndContinuesWhenClearReadStatsFails(t *testing.T) {
 }
 
 func TestSweepPaginatesAcrossMultiplePages(t *testing.T) {
-	page1 := storage.ListPage{Entries: []storage.Entry{{Hash: "old1", ModTime: oldEntry.ModTime}}, NextCursor: "old1"}
-	page2 := storage.ListPage{Entries: []storage.Entry{{Hash: "old2", ModTime: oldEntry.ModTime}}}
+	page1 := storage.ListPage{Entries: []storage.Entry{{Key: "old1", ModTime: oldEntry.ModTime}}, NextCursor: "old1"}
+	page2 := storage.ListPage{Entries: []storage.Entry{{Key: "old2", ModTime: oldEntry.ModTime}}}
 	backend := &fakeBackend{pages: []storage.ListPage{page1, page2}}
 	j := New(backend, &fakeReadStats{stats: map[string]store.CacheReadStats{}}, testLoggerExtra(), Config{MaxAge: time.Hour, UnreadAfter: time.Hour, Interval: time.Hour})
 

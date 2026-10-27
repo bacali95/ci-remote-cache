@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/store"
 )
 
 type fakeAuthenticator struct {
@@ -90,7 +90,7 @@ func TestGenerateToken(t *testing.T) {
 	if len(tok) < 20 {
 		t.Fatalf("token too short: %q", tok)
 	}
-	const prefix = "nxc_"
+	const prefix = "crc_"
 	if tok[:len(prefix)] != prefix {
 		t.Fatalf("token missing prefix: %q", tok)
 	}

@@ -1,4 +1,4 @@
-module nx-remote-cache
+module ci-remote-cache
 
 go 1.25.0
 

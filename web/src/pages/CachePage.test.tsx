@@ -10,8 +10,17 @@ vi.mock("@/lib/api", () => ({
 }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
-const entryA = { hash: "hashaaa", size: 2048, modTime: "2024-01-01T00:00:00Z", readCount: 3 }
+const entryA = {
+  key: "nx/hashaaa",
+  protocol: "nx",
+  hash: "hashaaa",
+  size: 2048,
+  modTime: "2024-01-01T00:00:00Z",
+  readCount: 3,
+}
 const entryB = {
+  key: "turbo/hashbbb",
+  protocol: "turbo",
   hash: "hashbbb",
   size: 512,
   modTime: "2024-01-02T00:00:00Z",
@@ -72,8 +81,8 @@ describe("CachePage", () => {
     expect(within(dialog).getByText("Delete this entry?")).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: "Delete" }))
 
-    await waitFor(() => expect(api.del).toHaveBeenCalledWith("/cache/hashaaa"))
-    expect(toast.success).toHaveBeenCalledWith("Deleted hashaaa")
+    await waitFor(() => expect(api.del).toHaveBeenCalledWith("/cache/nx%2Fhashaaa"))
+    expect(toast.success).toHaveBeenCalledWith("Deleted nx/hashaaa")
     await waitFor(() => expect(screen.queryByText("hashaaa")).not.toBeInTheDocument())
   })
 
@@ -88,7 +97,7 @@ describe("CachePage", () => {
     const dialog = await screen.findByRole("alertdialog")
     await user.click(within(dialog).getByRole("button", { name: "Delete" }))
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Failed to delete hashaaa"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Failed to delete nx/hashaaa"))
     expect(screen.getByText("hashaaa")).toBeInTheDocument()
   })
 
@@ -169,7 +178,7 @@ describe("CachePage", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete" }))
 
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith("/cache/bulk-delete", { hashes: ["hashaaa"] })
+      expect(api.post).toHaveBeenCalledWith("/cache/bulk-delete", { keys: ["nx/hashaaa"] })
     )
     expect(toast.success).toHaveBeenCalledWith("Deleted 1 entry")
   })
@@ -191,7 +200,7 @@ describe("CachePage", () => {
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith("/cache/bulk-delete", {
-        hashes: ["hashaaa", "hashbbb"],
+        keys: ["nx/hashaaa", "turbo/hashbbb"],
       })
     )
     expect(toast.success).toHaveBeenCalledWith("Deleted 2 entries")
@@ -283,5 +292,45 @@ describe("CachePage", () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
     expect(screen.getByText("hashaaa")).toBeInTheDocument()
     expect(screen.queryByText("hashbbb")).not.toBeInTheDocument()
+  })
+
+  it("labels each entry's client, marking legacy entries", async () => {
+    const legacy = { ...entryA, key: "oldhash", hash: "oldhash", legacy: true }
+    const unknown = { ...entryA, key: "bazel/xyz", protocol: "bazel", hash: "xyz" }
+    vi.mocked(api.get).mockResolvedValue({ entries: [entryA, entryB, legacy, unknown] })
+    render(<CachePage />)
+
+    const row = (hash: string) => screen.getByText(hash).closest("tr")!
+    await screen.findByText("hashaaa")
+    expect(within(row("hashaaa")).getByText("Nx")).toBeInTheDocument()
+    expect(within(row("hashbbb")).getByText("Turborepo")).toBeInTheDocument()
+    expect(within(row("oldhash")).getByText("legacy")).toBeInTheDocument()
+    expect(within(row("hashaaa")).queryByText("legacy")).not.toBeInTheDocument()
+    expect(within(row("xyz")).getByText("bazel")).toBeInTheDocument()
+  })
+
+  it("filters by client and clears the selection when the filter changes", async () => {
+    const user = userEvent.setup()
+    render(<CachePage />)
+    await screen.findByText("hashaaa")
+    const filters = screen.getByRole("group", { name: "Filter by client" })
+    expect(within(filters).getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    await user.click(within(screen.getByText("hashaaa").closest("tr")!).getByRole("checkbox"))
+    expect(screen.getByRole("button", { name: "Delete selected (1)" })).toBeEnabled()
+
+    vi.mocked(api.get).mockResolvedValueOnce({ entries: [entryB] })
+    await user.click(within(filters).getByRole("button", { name: "Turborepo" }))
+
+    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith("/cache?protocol=turbo"))
+    await waitFor(() => expect(screen.queryByText("hashaaa")).not.toBeInTheDocument())
+    expect(within(filters).getByRole("button", { name: "Turborepo" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByRole("button", { name: "Delete selected (0)" })).toBeDisabled()
   })
 })

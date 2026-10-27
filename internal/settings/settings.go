@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 // ErrInvalidSettings wraps user-fixable problems (missing bucket, bad
@@ -22,7 +22,7 @@ import (
 var ErrInvalidSettings = errors.New("settings: invalid configuration")
 
 // sessionTTLSetter and maxEntryBytesSetter are the minimal interfaces this
-// package needs from *session.Manager and *server.Server, kept local so
+// package needs from *session.Manager and *cache.Service, kept local so
 // settings can be unit tested without wiring up either of those (or a real
 // HTTP/DB stack) — see settings_test.go's fakes.
 type sessionTTLSetter interface {
@@ -192,7 +192,7 @@ func (m *Manager) Apply(ctx context.Context, in ApplyInput) (Settings, error) {
 	if err != nil {
 		return Settings{}, fmt.Errorf("%w: connect to storage backend: %v", ErrInvalidSettings, err)
 	}
-	if _, err := newBackend.List(ctx, "", 1); err != nil {
+	if _, err := newBackend.List(ctx, "", "", 1); err != nil {
 		return Settings{}, fmt.Errorf("%w: storage backend connectivity check failed: %v", ErrInvalidSettings, err)
 	}
 

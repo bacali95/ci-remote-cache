@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -108,30 +111,30 @@ func TestLocalListPagination(t *testing.T) {
 		}
 	}
 
-	page1, err := l.List(ctx, "", 2)
+	page1, err := l.List(ctx, "", "", 2)
 	if err != nil {
 		t.Fatalf("List page1: %v", err)
 	}
-	if len(page1.Entries) != 2 || page1.Entries[0].Hash != "a1" || page1.Entries[1].Hash != "a2" {
+	if len(page1.Entries) != 2 || page1.Entries[0].Key != "a1" || page1.Entries[1].Key != "a2" {
 		t.Fatalf("page1 = %+v, want [a1 a2]", page1.Entries)
 	}
 	if page1.NextCursor != "a2" {
 		t.Fatalf("page1.NextCursor = %q, want a2", page1.NextCursor)
 	}
 
-	page2, err := l.List(ctx, page1.NextCursor, 2)
+	page2, err := l.List(ctx, "", page1.NextCursor, 2)
 	if err != nil {
 		t.Fatalf("List page2: %v", err)
 	}
-	if len(page2.Entries) != 2 || page2.Entries[0].Hash != "a3" || page2.Entries[1].Hash != "a4" {
+	if len(page2.Entries) != 2 || page2.Entries[0].Key != "a3" || page2.Entries[1].Key != "a4" {
 		t.Fatalf("page2 = %+v, want [a3 a4]", page2.Entries)
 	}
 
-	page3, err := l.List(ctx, page2.NextCursor, 2)
+	page3, err := l.List(ctx, "", page2.NextCursor, 2)
 	if err != nil {
 		t.Fatalf("List page3: %v", err)
 	}
-	if len(page3.Entries) != 1 || page3.Entries[0].Hash != "a5" {
+	if len(page3.Entries) != 1 || page3.Entries[0].Key != "a5" {
 		t.Fatalf("page3 = %+v, want [a5]", page3.Entries)
 	}
 	if page3.NextCursor != "" {
@@ -152,4 +155,142 @@ func TestValidHash(t *testing.T) {
 			t.Errorf("ValidHash(%q) = true, want false", h)
 		}
 	}
+}
+
+func TestValidKey(t *testing.T) {
+	valid := []string{"abc123", "nx/abc123", "turbo/ABC_def-1"}
+	invalid := []string{"", "nx/", "/abc", "NX/abc", "a/b/c", "nx/../abc", "../abc", "nx/abc$"}
+	for _, k := range valid {
+		if !ValidKey(k) {
+			t.Errorf("ValidKey(%q) = false, want true", k)
+		}
+	}
+	for _, k := range invalid {
+		if ValidKey(k) {
+			t.Errorf("ValidKey(%q) = true, want false", k)
+		}
+	}
+	if got := Key("nx", "abc"); got != "nx/abc" || !ValidKey(got) {
+		t.Errorf("Key(nx, abc) = %q, want valid nx/abc", got)
+	}
+}
+
+func TestLocalNamespacedKeysAlongsideLegacyRootKeys(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	l, err := NewLocal(dir)
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	for _, k := range []string{"legacy", "nx/b", "turbo/a"} {
+		if err := l.Put(ctx, k, bytes.NewReader([]byte(k)), int64(len(k))); err != nil {
+			t.Fatalf("Put(%s): %v", k, err)
+		}
+	}
+	if err := l.Put(ctx, "nx/b", bytes.NewReader([]byte("x")), 1); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("duplicate namespaced Put err = %v, want ErrAlreadyExists", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nx", "c.tmp-123"), []byte("partial"), 0o644); err != nil {
+		t.Fatalf("write stray temp file: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "nx", "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+
+	r, size, err := l.Get(ctx, "turbo/a")
+	if err != nil {
+		t.Fatalf("Get(turbo/a): %v", err)
+	}
+	got, _ := io.ReadAll(r)
+	_ = r.Close()
+	if string(got) != "turbo/a" || size != 7 {
+		t.Fatalf("Get(turbo/a) = %q (size %d)", got, size)
+	}
+
+	page, err := l.List(ctx, "", "", 10)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var keys []string
+	for _, e := range page.Entries {
+		keys = append(keys, e.Key)
+	}
+	if want := []string{"legacy", "nx/b", "turbo/a"}; !slices.Equal(keys, want) {
+		t.Fatalf("List keys = %v, want %v", keys, want)
+	}
+
+	if err := l.Delete(ctx, "nx/b"); err != nil {
+		t.Fatalf("Delete(nx/b): %v", err)
+	}
+	if exists, _ := l.Exists(ctx, "nx/b"); exists {
+		t.Fatal("nx/b still exists after Delete")
+	}
+}
+
+func TestLocalListFailsWhenNamespaceDirUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	l, err := NewLocal(dir)
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	if err := l.Put(context.Background(), "nx/a", bytes.NewReader([]byte("x")), 1); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	nsDir := filepath.Join(dir, "nx")
+	if err := os.Chmod(nsDir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(nsDir, 0o755) })
+
+	if _, err := l.List(context.Background(), "", "", 10); err == nil {
+		t.Fatal("List err = nil, want an error for an unreadable namespace dir")
+	}
+}
+
+func TestLocalPutFailsWhenNamespaceDirCannotBeCreated(t *testing.T) {
+	dir := t.TempDir()
+	l, err := NewLocal(dir)
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nx"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+	if err := l.Put(context.Background(), "nx/a", bytes.NewReader([]byte("x")), 1); err == nil {
+		t.Fatal("Put err = nil, want an error when the namespace path is a file")
+	}
+}
+
+// testListByKeyPrefix checks that List's prefix selects one namespace,
+// excluding legacy root keys and other namespaces. Shared by every backend.
+func testListByKeyPrefix(t *testing.T, b Backend) {
+	t.Helper()
+	ctx := context.Background()
+	for _, k := range []string{"legacy", "nx/a", "turbo/b", "turbo/c"} {
+		if err := b.Put(ctx, k, bytes.NewReader([]byte("x")), 1); err != nil {
+			t.Fatalf("Put(%s): %v", k, err)
+		}
+	}
+	page, err := b.List(ctx, "turbo/", "", 10)
+	if err != nil {
+		t.Fatalf("List(turbo/): %v", err)
+	}
+	var keys []string
+	for _, e := range page.Entries {
+		keys = append(keys, e.Key)
+	}
+	if want := []string{"turbo/b", "turbo/c"}; !slices.Equal(keys, want) {
+		t.Fatalf("List(turbo/) keys = %v, want %v", keys, want)
+	}
+}
+
+func TestLocalListByKeyPrefix(t *testing.T) {
+	l, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	testListByKeyPrefix(t, l)
 }

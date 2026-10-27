@@ -54,6 +54,6 @@ func (d *Dynamic) Delete(ctx context.Context, hash string) error {
 	return d.Active().Delete(ctx, hash)
 }
 
-func (d *Dynamic) List(ctx context.Context, cursor string, limit int) (ListPage, error) {
-	return d.Active().List(ctx, cursor, limit)
+func (d *Dynamic) List(ctx context.Context, prefix, cursor string, limit int) (ListPage, error) {
+	return d.Active().List(ctx, prefix, cursor, limit)
 }

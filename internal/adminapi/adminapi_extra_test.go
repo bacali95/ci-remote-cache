@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"nx-remote-cache/internal/session"
+	"ci-remote-cache/internal/session"
 )
 
 func TestHandlerServesSpaWhenUIFSProvided(t *testing.T) {
@@ -408,7 +408,7 @@ func TestBulkDeleteOverHTTP(t *testing.T) {
 	}
 
 	w := doJSON(t, h, http.MethodPost, "/admin/api/cache/bulk-delete", bulkDeleteRequest{
-		Hashes: []string{"bulk1", "bulk2", "doesnotexist", "..invalid.."},
+		Keys: []string{"bulk1", "bulk2", "doesnotexist", "..invalid.."},
 	}, cookie, true)
 	if w.Code != http.StatusOK {
 		t.Fatalf("bulk delete: status = %d, body = %s", w.Code, w.Body)
@@ -430,7 +430,7 @@ func TestBulkDeleteOverHTTP(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = "x"
 	}
-	w = doJSON(t, h, http.MethodPost, "/admin/api/cache/bulk-delete", bulkDeleteRequest{Hashes: tooMany}, cookie, true)
+	w = doJSON(t, h, http.MethodPost, "/admin/api/cache/bulk-delete", bulkDeleteRequest{Keys: tooMany}, cookie, true)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("too many hashes: status = %d, want 400, body = %s", w.Code, w.Body)
 	}
@@ -482,5 +482,89 @@ func TestSpaHandlerServeIndexErrorWhenMissing(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 when index.html itself is missing", w.Code)
+	}
+}
+
+func TestDeleteNamespacedCacheEntries(t *testing.T) {
+	h, st, backend := testServer(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	cookie := loginAndGetCookie(t, h, "admin@example.com", "correct-password")
+	ctx := context.Background()
+
+	for _, k := range []string{"nx/abc", "turbo/def"} {
+		if err := backend.Put(ctx, k, bytes.NewReader([]byte("x")), 1); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+
+	w := doJSON(t, h, http.MethodDelete, "/admin/api/cache/nx%2Fabc", nil, cookie, true)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete nx/abc: status = %d, body = %s", w.Code, w.Body)
+	}
+	w = doJSON(t, h, http.MethodPost, "/admin/api/cache/bulk-delete", bulkDeleteRequest{
+		Keys: []string{"turbo/def"},
+	}, cookie, true)
+	var result deleteCountResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Deleted != 1 {
+		t.Fatalf("bulk delete turbo/def: status = %d, body = %s", w.Code, w.Body)
+	}
+
+	page, err := backend.List(ctx, "", "", 10)
+	if err != nil || len(page.Entries) != 0 {
+		t.Fatalf("entries left after deletes: %+v, %v", page.Entries, err)
+	}
+}
+
+func TestListCacheProtocolFieldsAndFilter(t *testing.T) {
+	h, st, backend := testServer(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	cookie := loginAndGetCookie(t, h, "admin@example.com", "correct-password")
+	ctx := context.Background()
+
+	for _, k := range []string{"oldhash", "nx/nxhash", "turbo/turbohash"} {
+		if err := backend.Put(ctx, k, bytes.NewReader([]byte("x")), 1); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+
+	list := func(query string) []cacheEntryResponse {
+		t.Helper()
+		w := doJSON(t, h, http.MethodGet, "/admin/api/cache"+query, nil, cookie, false)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list %s: status = %d, body = %s", query, w.Code, w.Body)
+		}
+		var page listCacheResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return page.Entries
+	}
+
+	byKey := map[string]cacheEntryResponse{}
+	for _, e := range list("") {
+		byKey[e.Key] = e
+	}
+	want := map[string]cacheEntryResponse{
+		"oldhash":         {Key: "oldhash", Protocol: "nx", Hash: "oldhash", Legacy: true},
+		"nx/nxhash":       {Key: "nx/nxhash", Protocol: "nx", Hash: "nxhash"},
+		"turbo/turbohash": {Key: "turbo/turbohash", Protocol: "turbo", Hash: "turbohash"},
+	}
+	for k, w := range want {
+		got := byKey[k]
+		if got.Key != w.Key || got.Protocol != w.Protocol || got.Hash != w.Hash || got.Legacy != w.Legacy {
+			t.Errorf("entry %s = %+v, want key/protocol/hash/legacy %+v", k, got, w)
+		}
+	}
+
+	if got := list("?protocol=turbo"); len(got) != 1 || got[0].Key != "turbo/turbohash" {
+		t.Fatalf("protocol=turbo entries = %+v, want only turbo/turbohash", got)
+	}
+	if got := list("?protocol=nx"); len(got) != 1 || got[0].Key != "nx/nxhash" {
+		t.Fatalf("protocol=nx entries = %+v, want only nx/nxhash", got)
+	}
+
+	w := doJSON(t, h, http.MethodGet, "/admin/api/cache?protocol=..%2F", nil, cookie, false)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid protocol: status = %d, want 400", w.Code)
 	}
 }

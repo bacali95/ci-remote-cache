@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -24,14 +25,15 @@ func NewLocal(dir string) (*Local, error) {
 	return &Local{dir: dir}, nil
 }
 
-// Path returns the on-disk file path for hash. Exported for operational
-// tooling (and tests) that need to touch the underlying file directly.
-func (l *Local) Path(hash string) string {
-	return filepath.Join(l.dir, hash)
+// Path returns the on-disk file path for key: a namespaced key's namespace
+// becomes a subdirectory. Exported for operational tooling (and tests) that
+// need to touch the underlying file directly.
+func (l *Local) Path(key string) string {
+	return filepath.Join(l.dir, filepath.FromSlash(key))
 }
 
-func (l *Local) Exists(_ context.Context, hash string) (bool, error) {
-	_, err := os.Stat(l.Path(hash))
+func (l *Local) Exists(_ context.Context, key string) (bool, error) {
+	_, err := os.Stat(l.Path(key))
 	if os.IsNotExist(err) {
 		return false, nil
 	}
@@ -41,15 +43,19 @@ func (l *Local) Exists(_ context.Context, hash string) (bool, error) {
 	return true, nil
 }
 
-func (l *Local) Put(_ context.Context, hash string, r io.Reader, size int64) error {
-	dest := l.Path(hash)
+func (l *Local) Put(_ context.Context, key string, r io.Reader, size int64) error {
+	dest := l.Path(key)
 	if _, err := os.Stat(dest); err == nil {
 		return ErrAlreadyExists
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 
-	tmp, err := os.CreateTemp(l.dir, hash+".tmp-*")
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create namespace dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(dest)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -68,7 +74,7 @@ func (l *Local) Put(_ context.Context, hash string, r io.Reader, size int64) err
 		return fmt.Errorf("short write: expected %d bytes, wrote %d", size, n)
 	}
 
-	// Atomic rename avoids a second writer racing the same hash into a
+	// Atomic rename avoids a second writer racing the same key into a
 	// half-written file; the loser's temp file is removed by the defer.
 	if err := os.Link(tmpName, dest); err != nil {
 		if os.IsExist(err) {
@@ -79,8 +85,8 @@ func (l *Local) Put(_ context.Context, hash string, r io.Reader, size int64) err
 	return nil
 }
 
-func (l *Local) Get(_ context.Context, hash string) (io.ReadCloser, int64, error) {
-	f, err := os.Open(l.Path(hash))
+func (l *Local) Get(_ context.Context, key string) (io.ReadCloser, int64, error) {
+	f, err := os.Open(l.Path(key))
 	if os.IsNotExist(err) {
 		return nil, 0, ErrNotFound
 	}
@@ -95,8 +101,8 @@ func (l *Local) Get(_ context.Context, hash string) (io.ReadCloser, int64, error
 	return f, info.Size(), nil
 }
 
-func (l *Local) Delete(_ context.Context, hash string) error {
-	err := os.Remove(l.Path(hash))
+func (l *Local) Delete(_ context.Context, key string) error {
+	err := os.Remove(l.Path(key))
 	if os.IsNotExist(err) {
 		return ErrNotFound
 	}
@@ -105,24 +111,14 @@ func (l *Local) Delete(_ context.Context, hash string) error {
 
 const defaultListLimit = 50
 
-func (l *Local) List(_ context.Context, cursor string, limit int) (ListPage, error) {
+func (l *Local) List(_ context.Context, prefix, cursor string, limit int) (ListPage, error) {
 	if limit <= 0 {
 		limit = defaultListLimit
 	}
 
-	dirEntries, err := os.ReadDir(l.dir)
+	names, err := l.keys(prefix)
 	if err != nil {
 		return ListPage{}, err
-	}
-
-	// os.ReadDir guarantees results sorted by filename, so a simple
-	// greater-than scan gives us cursor-based pagination for free.
-	var names []string
-	for _, e := range dirEntries {
-		if e.IsDir() || strings.Contains(e.Name(), ".tmp-") {
-			continue
-		}
-		names = append(names, e.Name())
 	}
 
 	start := sort.Search(len(names), func(i int) bool { return names[i] > cursor })
@@ -133,14 +129,44 @@ func (l *Local) List(_ context.Context, cursor string, limit int) (ListPage, err
 
 	page := ListPage{}
 	for _, name := range names[start:end] {
-		info, err := os.Stat(filepath.Join(l.dir, name))
+		info, err := os.Stat(l.Path(name))
 		if err != nil {
 			continue // removed between ReadDir and Stat; skip rather than fail the whole page
 		}
-		page.Entries = append(page.Entries, Entry{Hash: name, Size: info.Size(), ModTime: info.ModTime()})
+		page.Entries = append(page.Entries, Entry{Key: name, Size: info.Size(), ModTime: info.ModTime()})
 	}
 	if end < len(names) {
 		page.NextCursor = names[end-1]
 	}
 	return page, nil
+}
+
+// keys returns every stored key starting with prefix, sorted, so a simple
+// greater-than scan gives cursor-based pagination. Bare files at the root
+// are keys stored before namespacing; each subdirectory is one namespace.
+func (l *Local) keys(prefix string) ([]string, error) {
+	root, err := os.ReadDir(l.dir)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, e := range root {
+		if !e.IsDir() {
+			if !strings.Contains(e.Name(), ".tmp-") {
+				keys = append(keys, e.Name())
+			}
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(l.dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			if !f.IsDir() && !strings.Contains(f.Name(), ".tmp-") {
+				keys = append(keys, e.Name()+"/"+f.Name())
+			}
+		}
+	}
+	sort.Strings(keys)
+	return slices.DeleteFunc(keys, func(k string) bool { return !strings.HasPrefix(k, prefix) }), nil
 }

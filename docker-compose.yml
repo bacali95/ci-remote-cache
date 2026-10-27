@@ -2,20 +2,20 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: nxcache
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nxcache-dev-password}
-      POSTGRES_DB: nxcache
+      POSTGRES_USER: cicache
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cicache-dev-password}
+      POSTGRES_DB: cicache
     ports:
       - "5433:5432" # host 5433 avoids clashing with a local postgres; containers still talk on 5432
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nxcache"]
+      test: ["CMD-SHELL", "pg_isready -U cicache"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  nx-remote-cache:
+  ci-remote-cache:
     build: .
     depends_on:
       postgres:
@@ -26,7 +26,7 @@ services:
       PORT: "3000"
       # Container-to-container traffic uses postgres's internal port (5432)
       # regardless of the host-side mapping above.
-      DATABASE_URL: postgres://nxcache:${POSTGRES_PASSWORD:-nxcache-dev-password}@postgres:5432/nxcache?sslmode=disable
+      DATABASE_URL: postgres://cicache:${POSTGRES_PASSWORD:-cicache-dev-password}@postgres:5432/cicache?sslmode=disable
       # Encrypts cloud credentials (if configured via the Settings page) at
       # rest in Postgres. Generate with: openssl rand -base64 32
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in .env — see README}

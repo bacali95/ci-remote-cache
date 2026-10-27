@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { api, type CacheEntry, type ListCacheResponse } from "@/lib/api"
 import { formatBytes, formatDate } from "@/lib/format"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -35,6 +36,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
+const PROTOCOL_LABELS: Record<string, string> = { nx: "Nx", turbo: "Turborepo" }
+
+const FILTERS = [
+  { value: "", label: "All" },
+  { value: "nx", label: "Nx" },
+  { value: "turbo", label: "Turborepo" },
+]
+
 export function CachePage() {
   const [entries, setEntries] = useState<CacheEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | undefined>()
@@ -42,55 +51,60 @@ export function CachePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [pruneDays, setPruneDays] = useState("30")
   const [pruneOpen, setPruneOpen] = useState(false)
+  const [protocol, setProtocol] = useState("")
 
-  const load = useCallback(async (cursor?: string, replace = true) => {
-    setLoading(true)
-    try {
-      const qs = new URLSearchParams()
-      if (cursor) qs.set("cursor", cursor)
-      const page = await api.get<ListCacheResponse>(`/cache?${qs.toString()}`)
-      setEntries((prev) => (replace ? (page.entries ?? []) : [...prev, ...(page.entries ?? [])]))
-      setNextCursor(page.nextCursor)
-    } catch {
-      toast.error("Failed to load cache entries")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(
+    async (cursor?: string, replace = true) => {
+      setLoading(true)
+      try {
+        const qs = new URLSearchParams()
+        if (protocol) qs.set("protocol", protocol)
+        if (cursor) qs.set("cursor", cursor)
+        const page = await api.get<ListCacheResponse>(`/cache?${qs.toString()}`)
+        setEntries((prev) => (replace ? (page.entries ?? []) : [...prev, ...(page.entries ?? [])]))
+        setNextCursor(page.nextCursor)
+      } catch {
+        toast.error("Failed to load cache entries")
+      } finally {
+        setLoading(false)
+      }
+    },
+    [protocol]
+  )
 
   useEffect(() => {
     load()
   }, [load])
 
-  function toggle(hash: string) {
+  function toggle(key: string) {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(hash)) next.delete(hash)
-      else next.add(hash)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
   function toggleAll() {
     setSelected((prev) =>
-      prev.size === entries.length ? new Set() : new Set(entries.map((e) => e.hash))
+      prev.size === entries.length ? new Set() : new Set(entries.map((e) => e.key))
     )
   }
 
-  async function deleteOne(hash: string) {
+  async function deleteOne(key: string) {
     try {
-      await api.del(`/cache/${encodeURIComponent(hash)}`)
-      setEntries((prev) => prev.filter((e) => e.hash !== hash))
-      toast.success(`Deleted ${hash}`)
+      await api.del(`/cache/${encodeURIComponent(key)}`)
+      setEntries((prev) => prev.filter((e) => e.key !== key))
+      toast.success(`Deleted ${key}`)
     } catch {
-      toast.error(`Failed to delete ${hash}`)
+      toast.error(`Failed to delete ${key}`)
     }
   }
 
   async function deleteSelected() {
     try {
       const result = await api.post<{ deleted: number }>("/cache/bulk-delete", {
-        hashes: Array.from(selected),
+        keys: Array.from(selected),
       })
       toast.success(`Deleted ${result.deleted} entr${result.deleted === 1 ? "y" : "ies"}`)
       setSelected(new Set())
@@ -185,6 +199,24 @@ export function CachePage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-2" role="group" aria-label="Filter by client">
+        {FILTERS.map((f) => (
+          <Button
+            key={f.value}
+            type="button"
+            size="sm"
+            variant={protocol === f.value ? "default" : "outline"}
+            aria-pressed={protocol === f.value}
+            onClick={() => {
+              setProtocol(f.value)
+              setSelected(new Set())
+            }}
+          >
+            {f.label}
+          </Button>
+        ))}
+      </div>
+
       <Table>
         <TableHeader>
           <TableRow>
@@ -195,6 +227,7 @@ export function CachePage() {
                 aria-label="Select all"
               />
             </TableHead>
+            <TableHead>Client</TableHead>
             <TableHead>Hash</TableHead>
             <TableHead>Size</TableHead>
             <TableHead>Last modified</TableHead>
@@ -205,13 +238,28 @@ export function CachePage() {
         </TableHeader>
         <TableBody>
           {entries.map((entry) => (
-            <TableRow key={entry.hash}>
+            <TableRow key={entry.key}>
               <TableCell>
                 <Checkbox
-                  checked={selected.has(entry.hash)}
-                  onCheckedChange={() => toggle(entry.hash)}
-                  aria-label={`Select ${entry.hash}`}
+                  checked={selected.has(entry.key)}
+                  onCheckedChange={() => toggle(entry.key)}
+                  aria-label={`Select ${entry.key}`}
                 />
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-1">
+                  <Badge variant="secondary">
+                    {PROTOCOL_LABELS[entry.protocol] ?? entry.protocol}
+                  </Badge>
+                  {entry.legacy && (
+                    <Badge
+                      variant="outline"
+                      title="Stored before per-client namespaces; only listed under All"
+                    >
+                      legacy
+                    </Badge>
+                  )}
+                </div>
               </TableCell>
               <TableCell className="font-mono text-sm">{entry.hash}</TableCell>
               <TableCell>{formatBytes(entry.size)}</TableCell>
@@ -229,13 +277,13 @@ export function CachePage() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Permanently removes <span className="font-mono">{entry.hash}</span> from
+                        Permanently removes <span className="font-mono">{entry.key}</span> from
                         storage.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => deleteOne(entry.hash)}>
+                      <AlertDialogAction onClick={() => deleteOne(entry.key)}>
                         Delete
                       </AlertDialogAction>
                     </AlertDialogFooter>
@@ -246,7 +294,7 @@ export function CachePage() {
           ))}
           {!loading && entries.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
+              <TableCell colSpan={8} className="text-center text-muted-foreground">
                 No cache entries.
               </TableCell>
             </TableRow>

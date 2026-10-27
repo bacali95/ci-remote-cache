@@ -62,11 +62,11 @@ func TestDynamicGetDeleteList(t *testing.T) {
 		t.Fatalf("size = %d, want 7", size)
 	}
 
-	page, err := d.List(ctx, "", 10)
+	page, err := d.List(ctx, "", "", 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(page.Entries) != 1 || page.Entries[0].Hash != "hash1" {
+	if len(page.Entries) != 1 || page.Entries[0].Key != "hash1" {
 		t.Fatalf("List = %+v, want one entry for hash1", page.Entries)
 	}
 

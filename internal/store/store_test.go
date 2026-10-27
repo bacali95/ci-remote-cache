@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/db"
+	"ci-remote-cache/internal/db"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -33,7 +33,7 @@ func newTestStore(t *testing.T) *Store {
 
 	// app_settings.updated_by references users(id), so TRUNCATE ... CASCADE
 	// on users also empties the settings singleton — reseed its one row.
-	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens, cache_reads RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens, cache_artifacts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {

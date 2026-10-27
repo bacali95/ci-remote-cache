@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -51,7 +51,7 @@ func testServer(t *testing.T) (http.Handler, *store.Store, storage.Backend) {
 		t.Fatalf("pgxpool.New: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens, cache_reads RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens, cache_artifacts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {

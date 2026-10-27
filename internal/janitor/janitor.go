@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 // ReadStatsSource is the subset of *store.Store the janitor needs — kept
@@ -19,7 +19,7 @@ import (
 // instance for the pure scheduling/decision logic.
 type ReadStatsSource interface {
 	ListAllCacheReadStats(ctx context.Context) (map[string]store.CacheReadStats, error)
-	DeleteCacheReadStats(ctx context.Context, hash string) error
+	DeleteCacheArtifact(ctx context.Context, hash string) error
 }
 
 type Config struct {
@@ -93,20 +93,20 @@ func (j *Janitor) Sweep(ctx context.Context) (int, error) {
 	deleted := 0
 	cursor := ""
 	for {
-		page, err := j.backend.List(ctx, cursor, 200)
+		page, err := j.backend.List(ctx, "", cursor, 200)
 		if err != nil {
 			return deleted, fmt.Errorf("list entries: %w", err)
 		}
 		for _, e := range page.Entries {
-			if !shouldDelete(e, reads[e.Hash], ageCutoff, unreadCutoff) {
+			if !shouldDelete(e, reads[e.Key], ageCutoff, unreadCutoff) {
 				continue
 			}
-			if err := j.backend.Delete(ctx, e.Hash); err != nil && !errors.Is(err, storage.ErrNotFound) {
-				j.log.Warn("janitor: failed to delete entry", "hash", e.Hash, "error", err)
+			if err := j.backend.Delete(ctx, e.Key); err != nil && !errors.Is(err, storage.ErrNotFound) {
+				j.log.Warn("janitor: failed to delete entry", "hash", e.Key, "error", err)
 				continue
 			}
-			if err := j.reads.DeleteCacheReadStats(ctx, e.Hash); err != nil {
-				j.log.Warn("janitor: failed to clear read stats", "hash", e.Hash, "error", err)
+			if err := j.reads.DeleteCacheArtifact(ctx, e.Key); err != nil {
+				j.log.Warn("janitor: failed to clear read stats", "hash", e.Key, "error", err)
 			}
 			deleted++
 		}

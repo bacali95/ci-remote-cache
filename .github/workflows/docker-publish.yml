@@ -10,7 +10,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -32,7 +31,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # nx-remote-cache is the pre-rename image name, still published so
+          # existing deployments keep receiving releases. Drop it once they
+          # have moved to ci-remote-cache.
+          images: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/ci-remote-cache
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/nx-remote-cache
           tags: type=semver,pattern={{version}}
 
       - name: Build and push

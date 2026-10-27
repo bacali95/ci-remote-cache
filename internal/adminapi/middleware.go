@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/store"
 
 	"golang.org/x/time/rate"
 )
@@ -16,7 +16,7 @@ import (
 // cross-site requests in modern browsers; requiring a custom header is a
 // second, independent layer, since a cross-site <form> POST cannot set
 // custom headers.
-const csrfHeader = "X-Nxcache-Admin"
+const csrfHeader = "X-CI-Cache-Admin"
 
 // protected wraps a handler that needs an authenticated admin. Mutating
 // methods (anything but GET/HEAD) also require the CSRF header.
