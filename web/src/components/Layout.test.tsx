@@ -40,6 +40,15 @@ describe("Layout", () => {
     expect(screen.getByRole("link", { name: "Cache" })).not.toHaveClass("bg-accent")
   })
 
+  it("navigates home when the title is clicked", async () => {
+    const user = userEvent.setup()
+    renderLayout("/tokens")
+
+    await user.click(screen.getByRole("link", { name: "CI Remote Cache" }))
+
+    expect(screen.getByText("cache page")).toBeInTheDocument()
+  })
+
   it("logs out and navigates to /login on click", async () => {
     logout.mockResolvedValue(undefined)
     const user = userEvent.setup()

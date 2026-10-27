@@ -1,5 +1,5 @@
 import { DatabaseZap } from "lucide-react"
-import { NavLink, Outlet, useNavigate } from "react-router-dom"
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -26,10 +26,10 @@ export function Layout() {
       <header className="border-b bg-background">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-6">
-            <span className="flex items-center gap-2 font-semibold">
+            <Link to="/" className="flex items-center gap-2 font-semibold">
               <DatabaseZap aria-hidden className="size-5" />
               CI Remote Cache
-            </span>
+            </Link>
             <nav className="flex items-center gap-1">
               {navItems.map((item) => (
                 <NavLink
