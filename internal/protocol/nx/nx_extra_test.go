@@ -1,10 +1,9 @@
-package server
+package nx
 
 import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -56,14 +55,10 @@ func newErroringBackend(t *testing.T) *erroringBackend {
 	return &erroringBackend{Local: local}
 }
 
-func testLog() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 func TestHandleGetReturns500WhenAuthorizeFails(t *testing.T) {
 	backend := newErroringBackend(t)
 	tokens := auth.NewCacheTokenAuth(&errorAuthenticator{err: errors.New("boom")})
-	h := New(backend, tokens, newFakeReadTracker(), testLog(), 10*1024*1024).Handler()
+	h := newServer(backend, tokens, newFakeReadTracker()).Handler()
 
 	resp := doRequest(t, h, "GET", "/v1/cache/abc123", "any-token", nil)
 	if resp.Code != 500 {
@@ -74,7 +69,7 @@ func TestHandleGetReturns500WhenAuthorizeFails(t *testing.T) {
 func TestHandlePutReturns500WhenAuthorizeFails(t *testing.T) {
 	backend := newErroringBackend(t)
 	tokens := auth.NewCacheTokenAuth(&errorAuthenticator{err: errors.New("boom")})
-	h := New(backend, tokens, newFakeReadTracker(), testLog(), 10*1024*1024).Handler()
+	h := newServer(backend, tokens, newFakeReadTracker()).Handler()
 
 	resp := doRequest(t, h, "PUT", "/v1/cache/abc123", "any-token", []byte("x"))
 	if resp.Code != 500 {
@@ -88,7 +83,7 @@ func TestHandleGetReturns500WhenBackendGetFails(t *testing.T) {
 	fake := &fakeAuthenticator{byHash: map[string]store.Token{
 		auth.HashToken(readToken): {Scope: store.ScopeRead},
 	}}
-	h := New(backend, auth.NewCacheTokenAuth(fake), newFakeReadTracker(), testLog(), 10*1024*1024).Handler()
+	h := newServer(backend, auth.NewCacheTokenAuth(fake), newFakeReadTracker()).Handler()
 
 	resp := doRequest(t, h, "GET", "/v1/cache/abc123", readToken, nil)
 	if resp.Code != 500 {
@@ -102,7 +97,7 @@ func TestHandlePutReturns500WhenBackendPutFails(t *testing.T) {
 	fake := &fakeAuthenticator{byHash: map[string]store.Token{
 		auth.HashToken(writeToken): {Scope: store.ScopeWrite},
 	}}
-	h := New(backend, auth.NewCacheTokenAuth(fake), newFakeReadTracker(), testLog(), 10*1024*1024).Handler()
+	h := newServer(backend, auth.NewCacheTokenAuth(fake), newFakeReadTracker()).Handler()
 
 	resp := doRequest(t, h, "PUT", "/v1/cache/abc123", writeToken, []byte("x"))
 	if resp.Code != 500 {
@@ -110,8 +105,7 @@ func TestHandlePutReturns500WhenBackendPutFails(t *testing.T) {
 	}
 }
 
-// failingReadTracker always errors, to exercise handleGet's best-effort
-// RecordCacheRead failure branch: the download itself must still succeed
+// failingReadTracker always errors: the download itself must still succeed
 // even though tracking the read errors out.
 type failingReadTracker struct{ done chan struct{} }
 
@@ -149,7 +143,7 @@ func TestHandleGetLogsButDoesNotPanicWhenStreamingFails(t *testing.T) {
 		auth.HashToken(readToken):  {Scope: store.ScopeRead},
 		auth.HashToken(writeToken): {Scope: store.ScopeWrite},
 	}}
-	h := New(backend, auth.NewCacheTokenAuth(fake), newFakeReadTracker(), testLog(), 10*1024*1024).Handler()
+	h := newServer(backend, auth.NewCacheTokenAuth(fake), newFakeReadTracker()).Handler()
 
 	put := doRequest(t, h, "PUT", "/v1/cache/streamfail", writeToken, []byte("payload"))
 	if put.Code != 200 {
@@ -169,7 +163,7 @@ func TestHandleGetStillSucceedsWhenReadTrackingFails(t *testing.T) {
 		auth.HashToken(writeToken): {Scope: store.ScopeWrite},
 	}}
 	failingReads := &failingReadTracker{done: make(chan struct{}, 1)}
-	h := New(backend, auth.NewCacheTokenAuth(fake), failingReads, testLog(), 10*1024*1024).Handler()
+	h := newServer(backend, auth.NewCacheTokenAuth(fake), failingReads).Handler()
 
 	put := doRequest(t, h, "PUT", "/v1/cache/warntest", writeToken, []byte("payload"))
 	if put.Code != 200 {

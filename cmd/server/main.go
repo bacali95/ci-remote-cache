@@ -19,10 +19,12 @@ import (
 
 	"nx-remote-cache/internal/adminapi"
 	"nx-remote-cache/internal/auth"
+	"nx-remote-cache/internal/cache"
 	"nx-remote-cache/internal/config"
 	"nx-remote-cache/internal/db"
 	"nx-remote-cache/internal/janitor"
-	"nx-remote-cache/internal/server"
+	"nx-remote-cache/internal/protocol"
+	"nx-remote-cache/internal/protocol/nx"
 	"nx-remote-cache/internal/session"
 	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
@@ -108,14 +110,14 @@ func run(log *slog.Logger) error {
 
 	// The storage backend, session TTL, and max entry size are runtime
 	// settings (internal/settings) rather than fixed at startup: dynBackend
-	// is a swappable indirection both servers hold onto, and
-	// settingsMgr.Load populates it (plus the session/server atomics) from
-	// whatever's currently in Postgres before either server starts
+	// is a swappable indirection both the cache core and the admin API hold
+	// onto, and settingsMgr.Load populates it (plus the session/cache
+	// atomics) from whatever's currently in Postgres before either starts
 	// accepting requests.
 	dynBackend := storage.NewDynamic(nil)
 	sessions := session.NewManager(st, 0)
-	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
-	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, dataSrv)
+	cacheSvc := cache.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
+	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, cacheSvc)
 	if err := settingsMgr.Load(ctx); err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
@@ -133,9 +135,8 @@ func run(log *slog.Logger) error {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
-	mux.Handle("/v1/", dataSrv.Handler())
-	mux.Handle("/health", dataSrv.Handler())
 	mux.Handle("/admin/", adminSrv.Handler())
+	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log)))
 
 	httpServer := &http.Server{
 		Addr:         cfg.Addr,

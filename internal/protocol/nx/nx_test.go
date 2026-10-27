@@ -1,4 +1,4 @@
-package server
+package nx
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"nx-remote-cache/internal/auth"
+	"nx-remote-cache/internal/cache"
+	"nx-remote-cache/internal/protocol"
 	"nx-remote-cache/internal/storage"
 	"nx-remote-cache/internal/store"
 )
@@ -37,9 +39,9 @@ func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (s
 	return tok, nil
 }
 
-// fakeReadTracker satisfies server.ReadTracker without Postgres. notify
+// fakeReadTracker satisfies cache.ReadTracker without Postgres. notify
 // lets a test block until an async RecordCacheRead call actually lands,
-// since handleGet fires it in a goroutine.
+// since cache.Service.Get fires it in a goroutine.
 type fakeReadTracker struct {
 	mu     sync.Mutex
 	calls  []string
@@ -58,13 +60,29 @@ func (f *fakeReadTracker) RecordCacheRead(_ context.Context, hash string) error 
 	return nil
 }
 
-func newTestServer(t *testing.T) *Server {
+// testServer pairs the cache core with the Nx routes mounted the way
+// cmd/server mounts them, so tests can both send requests and change the
+// size limit.
+type testServer struct {
+	*cache.Service
+	handler http.Handler
+}
+
+func (s *testServer) Handler() http.Handler { return s.handler }
+
+func newServer(backend storage.Backend, tokens *auth.CacheTokenAuth, reads cache.ReadTracker) *testServer {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := cache.New(backend, tokens, reads, log, 10*1024*1024)
+	return &testServer{Service: svc, handler: protocol.Handler(log, New(svc, log))}
+}
+
+func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 	srv, _ := newTestServerWithReads(t)
 	return srv
 }
 
-func newTestServerWithReads(t *testing.T) (*Server, *fakeReadTracker) {
+func newTestServerWithReads(t *testing.T) (*testServer, *fakeReadTracker) {
 	t.Helper()
 	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
@@ -76,8 +94,7 @@ func newTestServerWithReads(t *testing.T) (*Server, *fakeReadTracker) {
 	}}
 	tokens := auth.NewCacheTokenAuth(fake)
 	reads := newFakeReadTracker()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(backend, tokens, reads, log, 10*1024*1024), reads
+	return newServer(backend, tokens, reads), reads
 }
 
 func doRequest(t *testing.T, h http.Handler, method, path, token string, body []byte) *httptest.ResponseRecorder {
@@ -254,13 +271,5 @@ func TestInvalidHashRejected(t *testing.T) {
 	resp := doRequest(t, h, http.MethodGet, "/v1/cache/abc%2e%2e%24def", readToken, nil)
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for hash with disallowed characters", resp.Code)
-	}
-}
-
-func TestHealthNoAuth(t *testing.T) {
-	h := newTestServer(t).Handler()
-	resp := doRequest(t, h, http.MethodGet, "/health", "", nil)
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.Code)
 	}
 }

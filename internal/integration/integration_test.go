@@ -1,7 +1,8 @@
-// Package integration wires the data-plane server (internal/server) and the
-// admin API (internal/adminapi) together exactly like cmd/server/main.go
-// does, then drives the whole system over real HTTP. Neither package's own
-// tests do this: internal/server fakes token auth, internal/adminapi never
+// Package integration wires the data plane (internal/cache plus the
+// internal/protocol adapters) and the admin API (internal/adminapi)
+// together exactly like cmd/server/main.go does, then drives the whole
+// system over real HTTP. Neither side's own tests do this: the protocol
+// tests fake token auth, internal/adminapi never
 // touches the data plane, so a token minted by the admin API and a request
 // against /v1/cache have never actually been exercised together before.
 package integration
@@ -24,8 +25,10 @@ import (
 
 	"nx-remote-cache/internal/adminapi"
 	"nx-remote-cache/internal/auth"
+	"nx-remote-cache/internal/cache"
 	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/server"
+	"nx-remote-cache/internal/protocol"
+	"nx-remote-cache/internal/protocol/nx"
 	"nx-remote-cache/internal/session"
 	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
@@ -81,17 +84,16 @@ func testSystem(t *testing.T) (baseURL string, st *store.Store) {
 
 	dynBackend := storage.NewDynamic(nil)
 	sessions := session.NewManager(st, time.Hour)
-	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
-	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, dataSrv)
+	cacheSvc := cache.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
+	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, cacheSvc)
 	if err := settingsMgr.Load(context.Background()); err != nil {
 		t.Fatalf("settings Load: %v", err)
 	}
 	adminSrv := adminapi.New(st, sessions, dynBackend, settingsMgr, log, false, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", dataSrv.Handler())
-	mux.Handle("/health", dataSrv.Handler())
 	mux.Handle("/admin/", adminSrv.Handler())
+	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log)))
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

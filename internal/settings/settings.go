@@ -22,7 +22,7 @@ import (
 var ErrInvalidSettings = errors.New("settings: invalid configuration")
 
 // sessionTTLSetter and maxEntryBytesSetter are the minimal interfaces this
-// package needs from *session.Manager and *server.Server, kept local so
+// package needs from *session.Manager and *cache.Service, kept local so
 // settings can be unit tested without wiring up either of those (or a real
 // HTTP/DB stack) — see settings_test.go's fakes.
 type sessionTTLSetter interface {
