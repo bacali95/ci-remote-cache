@@ -1,5 +1,6 @@
-// Command server runs an Nx self-hosted remote cache server:
-// https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server
+// Command server runs a self-hosted remote cache server for Nx
+// (https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server)
+// and Turborepo (https://turborepo.dev/api/remote-cache-spec) side by side,
 // alongside an embedded admin UI for browsing/pruning the cache and
 // managing users, access tokens, and runtime settings (storage backend,
 // session TTL, max cache entry size — all live in Postgres and are
@@ -25,6 +26,7 @@ import (
 	"nx-remote-cache/internal/janitor"
 	"nx-remote-cache/internal/protocol"
 	"nx-remote-cache/internal/protocol/nx"
+	"nx-remote-cache/internal/protocol/turbo"
 	"nx-remote-cache/internal/session"
 	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
@@ -136,7 +138,7 @@ func run(log *slog.Logger) error {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
 	mux.Handle("/admin/", adminSrv.Handler())
-	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log)))
+	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log), turbo.New(cacheSvc, log)))
 
 	httpServer := &http.Server{
 		Addr:         cfg.Addr,

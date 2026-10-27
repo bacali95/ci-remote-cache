@@ -47,6 +47,10 @@ func (noopArtifacts) RecordCacheArtifact(context.Context, string, int64, store.A
 	return nil
 }
 
+func (noopArtifacts) GetCacheArtifactInfoBatch(context.Context, []string) (map[string]store.ArtifactInfo, error) {
+	return nil, nil
+}
+
 func (noopArtifacts) GetCacheArtifactMeta(context.Context, string) (store.ArtifactMeta, error) {
 	return store.ArtifactMeta{}, store.ErrNotFound
 }

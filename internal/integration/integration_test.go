@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"nx-remote-cache/internal/db"
 	"nx-remote-cache/internal/protocol"
 	"nx-remote-cache/internal/protocol/nx"
+	"nx-remote-cache/internal/protocol/turbo"
 	"nx-remote-cache/internal/session"
 	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
@@ -94,7 +96,7 @@ func testSystem(t *testing.T) (baseURL string, st *store.Store) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/admin/", adminSrv.Handler())
-	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log)))
+	mux.Handle("/", protocol.Handler(log, nx.New(cacheSvc, log), turbo.New(cacheSvc, log)))
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -325,5 +327,86 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		t.Fatalf("GET after admin delete: status = %d, want 404", resp.StatusCode)
 	} else {
 		_ = resp.Body.Close()
+	}
+}
+
+// TestNxAndTurboShareTokensButNotArtifacts runs both clients against one
+// server: a single admin-minted token works for both, the same hash
+// uploaded by each lands in separate namespaces, and Turborepo's
+// x-artifact-* metadata round-trips through Postgres.
+func TestNxAndTurboShareTokensButNotArtifacts(t *testing.T) {
+	baseURL, st := testSystem(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	admin := newAdminClient(t, baseURL)
+	admin.login("admin@example.com", "correct-password")
+	tok := admin.createToken("ci", "write").Token
+
+	const hash = "abc123def456"
+	if resp := cacheRequest(t, baseURL, http.MethodPut, hash, tok, []byte("nx-artifact")); resp.StatusCode != http.StatusOK {
+		t.Fatalf("nx PUT: status = %d", resp.StatusCode)
+	} else {
+		_ = resp.Body.Close()
+	}
+
+	turbo := func(method string, body []byte, headers map[string]string) *http.Response {
+		t.Helper()
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		req, err := http.NewRequest(method, baseURL+"/v8/artifacts/"+hash+"?slug=team", reqBody)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("turbo %s: %v", method, err)
+		}
+		return resp
+	}
+
+	if resp := turbo(http.MethodGet, nil, nil); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("turbo GET before upload: status = %d, want 404 (nx artifact must not leak)", resp.StatusCode)
+	} else {
+		_ = resp.Body.Close()
+	}
+
+	resp := turbo(http.MethodPut, []byte("turbo-artifact"), map[string]string{
+		"x-artifact-duration": "250",
+		"x-artifact-tag":      "dGFn",
+	})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("turbo PUT: status = %d, want 202", resp.StatusCode)
+	}
+
+	resp = turbo(http.MethodGet, nil, nil)
+	got, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(got) != "turbo-artifact" {
+		t.Fatalf("turbo GET = %d %q, want 200 turbo-artifact", resp.StatusCode, got)
+	}
+	if tag, dur := resp.Header.Get("x-artifact-tag"), resp.Header.Get("x-artifact-duration"); tag != "dGFn" || dur != "250" {
+		t.Fatalf("turbo GET metadata = tag %q, duration %q; want dGFn, 250", tag, dur)
+	}
+
+	nxResp := cacheRequest(t, baseURL, http.MethodGet, hash, tok, nil)
+	got, _ = io.ReadAll(nxResp.Body)
+	_ = nxResp.Body.Close()
+	if string(got) != "nx-artifact" {
+		t.Fatalf("nx GET = %q, want nx-artifact unaffected by the turbo upload", got)
+	}
+
+	var keys []string
+	for _, e := range admin.listCache() {
+		keys = append(keys, e.Hash)
+	}
+	slices.Sort(keys)
+	if want := []string{"nx/" + hash, "turbo/" + hash}; !slices.Equal(keys, want) {
+		t.Fatalf("admin cache keys = %v, want %v", keys, want)
 	}
 }

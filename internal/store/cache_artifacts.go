@@ -54,6 +54,38 @@ func (s *Store) GetCacheArtifactMeta(ctx context.Context, key string) (ArtifactM
 	return meta, err
 }
 
+type ArtifactInfo struct {
+	Size int64
+	Meta ArtifactMeta
+}
+
+// GetCacheArtifactInfoBatch returns size and metadata for the given keys.
+// Keys with no row, or whose row predates upload tracking (no size), are
+// absent from the result.
+func (s *Store) GetCacheArtifactInfoBatch(ctx context.Context, keys []string) (map[string]ArtifactInfo, error) {
+	out := make(map[string]ArtifactInfo, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT key, size, duration_ms, tag, sha, dirty_hash FROM cache_artifacts
+		WHERE key = ANY($1) AND size IS NOT NULL
+	`, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var info ArtifactInfo
+		if err := rows.Scan(&key, &info.Size, &info.Meta.DurationMs, &info.Meta.Tag, &info.Meta.SHA, &info.Meta.DirtyHash); err != nil {
+			return nil, err
+		}
+		out[key] = info
+	}
+	return out, rows.Err()
+}
+
 // RecordCacheRead increments the read counter and stamps last_read_at for
 // key, creating the row on first read.
 func (s *Store) RecordCacheRead(ctx context.Context, key string) error {

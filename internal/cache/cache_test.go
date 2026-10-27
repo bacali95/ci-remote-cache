@@ -59,6 +59,21 @@ func (f *fakeReadTracker) RecordCacheArtifact(_ context.Context, key string, _ i
 	return f.err
 }
 
+func (f *fakeReadTracker) GetCacheArtifactInfoBatch(_ context.Context, keys []string) (map[string]store.ArtifactInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := map[string]store.ArtifactInfo{}
+	for _, k := range keys {
+		if meta, ok := f.meta[k]; ok {
+			out[k] = store.ArtifactInfo{Meta: meta}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeReadTracker) GetCacheArtifactMeta(_ context.Context, key string) (store.ArtifactMeta, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -289,5 +304,56 @@ func TestPutSucceedsAndMetaErrorsWhenTrackerFails(t *testing.T) {
 	}
 	if _, err := svc.Meta(ctx, "turbo", "abc"); err == nil {
 		t.Fatal("Meta err = nil, want the tracker's error")
+	}
+}
+
+func TestExistsFollowsLegacyFallback(t *testing.T) {
+	backend, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	ctx := context.Background()
+	for _, k := range []string{"old", "turbo/new"} {
+		if err := backend.Put(ctx, k, strings.NewReader("x"), 1); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+	svc := New(backend, nil, &fakeReadTracker{}, slog.New(slog.NewTextHandler(io.Discard, nil)), 10)
+
+	tests := []struct {
+		namespace, hash string
+		want            bool
+	}{
+		{"nx", "old", true},
+		{"turbo", "old", false},
+		{"turbo", "new", true},
+		{"nx", "missing", false},
+	}
+	for _, tt := range tests {
+		if got, err := svc.Exists(ctx, tt.namespace, tt.hash); err != nil || got != tt.want {
+			t.Errorf("Exists(%s, %s) = %v, %v; want %v, nil", tt.namespace, tt.hash, got, err, tt.want)
+		}
+	}
+}
+
+func TestQueryMapsKeysBackToHashes(t *testing.T) {
+	svc := newTestService(t, &fakeReadTracker{notify: make(chan string, 1)}, io.Discard)
+	ctx := context.Background()
+	meta := store.ArtifactMeta{Tag: "t"}
+	if err := svc.Put(ctx, "turbo", "abc", strings.NewReader("x"), 1, meta); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	got, err := svc.Query(ctx, "turbo", []string{"abc", "missing"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(got) != 1 || got["abc"].Meta != meta {
+		t.Fatalf("Query = %+v, want only abc with its meta", got)
+	}
+
+	failing := newTestService(t, &fakeReadTracker{err: errors.New("db down"), notify: make(chan string, 1)}, io.Discard)
+	if _, err := failing.Query(ctx, "turbo", []string{"abc"}); err == nil {
+		t.Fatal("Query err = nil, want the tracker's error")
 	}
 }

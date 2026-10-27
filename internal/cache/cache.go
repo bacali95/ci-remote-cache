@@ -39,6 +39,7 @@ type Tracker interface {
 	RecordCacheRead(ctx context.Context, key string) error
 	RecordCacheArtifact(ctx context.Context, key string, size int64, meta store.ArtifactMeta) error
 	GetCacheArtifactMeta(ctx context.Context, key string) (store.ArtifactMeta, error)
+	GetCacheArtifactInfoBatch(ctx context.Context, keys []string) (map[string]store.ArtifactInfo, error)
 }
 
 type Service struct {
@@ -107,6 +108,16 @@ func (s *Service) Get(ctx context.Context, namespace, hash string) (io.ReadClose
 	return body, size, nil
 }
 
+// Exists reports whether an artifact is stored for hash in namespace,
+// following the same legacy-key fallback as Get.
+func (s *Service) Exists(ctx context.Context, namespace, hash string) (bool, error) {
+	ok, err := s.backend.Exists(ctx, storage.Key(namespace, hash))
+	if err == nil && !ok && namespace == legacyNamespace {
+		return s.backend.Exists(ctx, hash)
+	}
+	return ok, err
+}
+
 // Put stores size bytes from r for hash in namespace, along with meta.
 // Returns ErrTooLarge if size is over the limit, or
 // storage.ErrAlreadyExists if the artifact is already stored.
@@ -132,4 +143,24 @@ func (s *Service) Meta(ctx context.Context, namespace, hash string) (store.Artif
 		return store.ArtifactMeta{}, nil
 	}
 	return meta, err
+}
+
+// Query returns size and metadata for each of hashes in namespace that
+// has a recorded upload, keyed by hash. Hashes without one are absent.
+func (s *Service) Query(ctx context.Context, namespace string, hashes []string) (map[string]store.ArtifactInfo, error) {
+	keys := make([]string, len(hashes))
+	for i, h := range hashes {
+		keys[i] = storage.Key(namespace, h)
+	}
+	byKey, err := s.tracker.GetCacheArtifactInfoBatch(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]store.ArtifactInfo, len(byKey))
+	for i, key := range keys {
+		if info, ok := byKey[key]; ok {
+			out[hashes[i]] = info
+		}
+	}
+	return out, nil
 }

@@ -152,3 +152,29 @@ func TestUploadedButUnreadArtifactsAreNotReadStats(t *testing.T) {
 		t.Fatalf("unread artifact reported as read: batch=%v all=%v", batch, all)
 	}
 }
+
+func TestGetCacheArtifactInfoBatch(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	meta := ArtifactMeta{DurationMs: 99, Tag: "sig"}
+	if err := s.RecordCacheArtifact(ctx, "turbo/up", 12, meta); err != nil {
+		t.Fatalf("RecordCacheArtifact: %v", err)
+	}
+	if err := s.RecordCacheRead(ctx, "readonly"); err != nil {
+		t.Fatalf("RecordCacheRead: %v", err)
+	}
+
+	got, err := s.GetCacheArtifactInfoBatch(ctx, []string{"turbo/up", "readonly", "turbo/missing"})
+	if err != nil {
+		t.Fatalf("GetCacheArtifactInfoBatch: %v", err)
+	}
+	if len(got) != 1 || got["turbo/up"] != (ArtifactInfo{Size: 12, Meta: meta}) {
+		t.Fatalf("GetCacheArtifactInfoBatch = %+v, want only turbo/up with size 12", got)
+	}
+
+	empty, err := s.GetCacheArtifactInfoBatch(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("GetCacheArtifactInfoBatch(nil) = %+v, %v; want empty map", empty, err)
+	}
+}

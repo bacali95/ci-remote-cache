@@ -17,6 +17,21 @@ cache entries and managing users and access tokens.
 Cache entries are content-addressed and immutable: a hash is written once
 (`PUT`) and never overwritten — a second `PUT` for the same hash returns 409.
 
+The same server also implements the
+[Turborepo remote cache API](https://turborepo.dev/api/remote-cache-spec)
+under `/v8/artifacts` (the `turbo` client adds the `/v8` prefix itself):
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| GET    | `/v8/artifacts/status` | Bearer, read | `{"status":"enabled"}` |
+| HEAD / GET | `/v8/artifacts/{hash}` | Bearer, read | returns stored `x-artifact-*` headers (incl. the signature tag) |
+| PUT    | `/v8/artifacts/{hash}` | Bearer, write | 202; re-uploading an existing hash is also 202 |
+| POST   | `/v8/artifacts` | Bearer, read | batch lookup of size / duration / tag |
+| POST   | `/v8/artifacts/events` | Bearer, read | hit/miss analytics, validated and acknowledged |
+
+Both protocols are always on, use the same tokens, and store artifacts in
+separate namespaces (`nx/<hash>`, `turbo/<hash>`), so they never collide.
+
 ## Admin UI
 
 Visit `/admin` on your running server. There's no public sign-up — the
@@ -157,6 +172,17 @@ environment variables in your CI job (and locally, if desired):
 export NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://nx-cache.example.com
 export NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=$CACHE_TOKEN
 ```
+
+## Turborepo client configuration
+
+```bash
+export TURBO_API=https://nx-cache.example.com
+export TURBO_TOKEN=$CACHE_TOKEN
+export TURBO_TEAM=any-name   # required by turbo to enable remote caching; its value is ignored
+```
+
+Optionally sign artifacts by setting `"remoteCache": { "signature": true }`
+in `turbo.json` and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` (32+ bytes) in CI.
 
 ## CI/CD for this repo
 
