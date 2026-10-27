@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/store"
 )
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request, _ store.User) {

@@ -12,7 +12,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"nx-remote-cache/internal/session"
+	"ci-remote-cache/internal/session"
 )
 
 func TestHandlerServesSpaWhenUIFSProvided(t *testing.T) {

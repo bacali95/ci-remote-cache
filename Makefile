@@ -13,4 +13,4 @@ run: build
 	./bin/server
 
 docker:
-	docker build -t nx-remote-cache:local .
+	docker build -t ci-remote-cache:local .

@@ -1,4 +1,4 @@
-# nx-remote-cache admin UI
+# ci-remote-cache admin UI
 
 React + TypeScript + Vite + shadcn/ui frontend for the admin API in
 `internal/adminapi`. Built output (`dist/`) is embedded into the Go binary

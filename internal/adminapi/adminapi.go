@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"nx-remote-cache/internal/httplog"
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/httplog"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 type Server struct {

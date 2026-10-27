@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/store"
 
 	"golang.org/x/crypto/bcrypt"
 )

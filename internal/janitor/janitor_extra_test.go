@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 func testLoggerExtra() *slog.Logger {

@@ -25,22 +25,22 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/adminapi"
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/cache"
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/protocol"
-	"nx-remote-cache/internal/protocol/nx"
-	"nx-remote-cache/internal/protocol/turbo"
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/adminapi"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/cache"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/protocol"
+	"ci-remote-cache/internal/protocol/nx"
+	"ci-remote-cache/internal/protocol/turbo"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const csrfHeader = "X-Nxcache-Admin"
+const csrfHeader = "X-CI-Cache-Admin"
 
 // testSystem boots the full app (data-plane + admin API, sharing one store,
 // one dynamic storage backend, one settings manager) against a real

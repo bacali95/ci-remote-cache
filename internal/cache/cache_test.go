@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 const (

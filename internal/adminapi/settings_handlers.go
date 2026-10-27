@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"nx-remote-cache/internal/settings"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/settings"
+	"ci-remote-cache/internal/store"
 )
 
 type settingsResponse struct {

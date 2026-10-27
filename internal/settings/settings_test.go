@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -218,7 +218,7 @@ func TestApplyRejectsUnreachableS3WithoutSwapping(t *testing.T) {
 	badSecret := "not-a-real-secret"
 	_, err := m.Apply(ctx, ApplyInput{
 		StorageBackend:     store.StorageS3,
-		S3Bucket:           "definitely-does-not-exist-nx-remote-cache-test",
+		S3Bucket:           "definitely-does-not-exist-ci-remote-cache-test",
 		S3Region:           "us-east-1",
 		S3AccessKeyID:      &badKey,
 		S3SecretAccessKey:  &badSecret,

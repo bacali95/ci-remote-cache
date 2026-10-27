@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 // ErrUnauthorized means the bearer token is missing, unknown, or revoked.

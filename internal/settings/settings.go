@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 // ErrInvalidSettings wraps user-fixable problems (missing bucket, bad

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"nx-remote-cache/internal/db"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/db"
+	"ci-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )

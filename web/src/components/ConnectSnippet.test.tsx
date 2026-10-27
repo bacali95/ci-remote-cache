@@ -25,12 +25,12 @@ describe("ConnectSnippet", () => {
 
   it("switches to Turborepo variables with the given token", async () => {
     const user = userEvent.setup()
-    render(<ConnectSnippet token="nxc_secret" />)
+    render(<ConnectSnippet token="crc_secret" />)
     await user.click(screen.getByRole("button", { name: "Turborepo" }))
 
     const text = screen.getByLabelText("Environment variables").textContent
     expect(text).toContain(`TURBO_API=${origin}`)
-    expect(text).toContain("TURBO_TOKEN=nxc_secret")
+    expect(text).toContain("TURBO_TOKEN=crc_secret")
     expect(text).toContain("TURBO_TEAM=")
     expect(screen.getByRole("button", { name: "Turborepo" })).toHaveAttribute(
       "aria-pressed",

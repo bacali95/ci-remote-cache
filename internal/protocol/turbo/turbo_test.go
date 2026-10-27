@@ -13,11 +13,11 @@ import (
 	"sync"
 	"testing"
 
-	"nx-remote-cache/internal/auth"
-	"nx-remote-cache/internal/cache"
-	"nx-remote-cache/internal/protocol"
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/auth"
+	"ci-remote-cache/internal/cache"
+	"ci-remote-cache/internal/protocol"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 const (

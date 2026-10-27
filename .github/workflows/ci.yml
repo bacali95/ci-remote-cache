@@ -16,19 +16,19 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: nxcache
-          POSTGRES_PASSWORD: nxcache-ci-password
-          POSTGRES_DB: nxcache
+          POSTGRES_USER: cicache
+          POSTGRES_PASSWORD: cicache-ci-password
+          POSTGRES_DB: cicache
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U nxcache"
+          --health-cmd "pg_isready -U cicache"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
 
     env:
-      TEST_DATABASE_URL: postgres://nxcache:nxcache-ci-password@localhost:5432/nxcache?sslmode=disable
+      TEST_DATABASE_URL: postgres://cicache:cicache-ci-password@localhost:5432/cicache?sslmode=disable
 
     steps:
       - uses: actions/checkout@v4

@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"time"
 
-	"nx-remote-cache/internal/session"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/session"
+	"ci-remote-cache/internal/store"
 )
 
-const sessionCookieName = "nxcache_session"
+const sessionCookieName = "cicache_session"
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, rawSessionID string) {
 	http.SetCookie(w, &http.Cookie{

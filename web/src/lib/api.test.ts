@@ -32,7 +32,7 @@ describe("api", () => {
     )
     const [, init] = vi.mocked(fetch).mock.calls[0]
     const headers = init?.headers as Record<string, string> | undefined
-    expect(headers?.["X-Nxcache-Admin"]).toBeUndefined()
+    expect(headers?.["X-CI-Cache-Admin"]).toBeUndefined()
   })
 
   it("POST sends the CSRF header and a JSON body", async () => {
@@ -44,7 +44,7 @@ describe("api", () => {
     expect(url).toBe("/admin/api/tokens")
     expect(init?.method).toBe("POST")
     const headers = init?.headers as Record<string, string> | undefined
-    expect(headers?.["X-Nxcache-Admin"]).toBe("1")
+    expect(headers?.["X-CI-Cache-Admin"]).toBe("1")
     expect(init?.body).toBe(JSON.stringify({ name: "ci" }))
   })
 
@@ -57,7 +57,7 @@ describe("api", () => {
     expect(url).toBe("/admin/api/settings")
     expect(init?.method).toBe("PUT")
     const headers = init?.headers as Record<string, string> | undefined
-    expect(headers?.["X-Nxcache-Admin"]).toBe("1")
+    expect(headers?.["X-CI-Cache-Admin"]).toBe("1")
     expect(init?.body).toBe(JSON.stringify({ storageBackend: "local" }))
   })
 

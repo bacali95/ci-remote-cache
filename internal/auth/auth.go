@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/store"
 )
 
 type Scope int
@@ -78,7 +78,7 @@ func GenerateToken() (string, error) {
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	return "nxc_" + base64.RawURLEncoding.EncodeToString(buf), nil
+	return "crc_" + base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // ExtractBearer pulls the token out of an "Authorization: Bearer <token>"

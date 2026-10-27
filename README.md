@@ -1,12 +1,19 @@
-# nx-remote-cache
+# ci-remote-cache
 
-Self-hosted remote cache server for [Nx](https://nx.dev), implementing the
-HTTP contract from
-[nx.dev/docs/kb/self-hosted-caching](https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server)
-in Go, with an embedded admin UI (React + shadcn/ui) for browsing/pruning
-cache entries and managing users and access tokens.
+Self-hosted remote build cache for monorepo tools, written in Go, with an
+embedded admin UI (React + shadcn/ui) for browsing/pruning cache entries and
+managing users and access tokens. One server, one set of tokens, serves:
+
+- [Nx](https://nx.dev), via its
+  [self-hosted caching contract](https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server)
+- [Turborepo](https://turborepo.dev), via its
+  [remote cache API](https://turborepo.dev/api/remote-cache-spec)
+
+Formerly `nx-remote-cache` — see [Upgrading from nx-remote-cache](#upgrading-from-nx-remote-cache).
 
 ## Cache API (data plane)
+
+### Nx
 
 | Method | Path              | Auth              | Success | Failure                              |
 |--------|-------------------|-------------------|---------|---------------------------------------|
@@ -17,9 +24,9 @@ cache entries and managing users and access tokens.
 Cache entries are content-addressed and immutable: a hash is written once
 (`PUT`) and never overwritten — a second `PUT` for the same hash returns 409.
 
-The same server also implements the
-[Turborepo remote cache API](https://turborepo.dev/api/remote-cache-spec)
-under `/v8/artifacts` (the `turbo` client adds the `/v8` prefix itself):
+### Turborepo
+
+Served under `/v8/artifacts` (the `turbo` client adds the `/v8` prefix itself):
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
@@ -39,11 +46,12 @@ first login comes from the bootstrap admin (see `ADMIN_BOOTSTRAP_EMAIL` /
 `ADMIN_BOOTSTRAP_PASSWORD` below); from there, create more admin accounts
 and access tokens from the UI itself.
 
-- **Cache** — paginated list of stored entries (hash, size, last modified),
-  delete one or select many for bulk delete, or prune everything older than
-  N days.
+- **Cache** — paginated list of stored entries (client, hash, size, last
+  modified, reads), filterable by client; delete one or select many for
+  bulk delete, or prune everything older than N days.
 - **Tokens** — create/revoke bearer tokens used by CI (`read` or `write`
-  scope). The raw token is shown once at creation time and never again.
+  scope). The raw token is shown once at creation time and never again,
+  together with ready-to-paste environment variables for Nx or Turborepo.
 - **Users** — create/delete admin accounts, change your own password.
 - **Settings** — storage backend (local/S3/GCS) and its credentials,
   session lifetime, max cache entry size. See below.
@@ -96,7 +104,7 @@ live in the database it protects.
 | Variable | Default | Notes |
 |---|---|---|
 | `PORT` | `3000` | listen port |
-| `DATABASE_URL` | — | **required.** Postgres connection string, e.g. `postgres://user:pass@host:5432/nxcache?sslmode=disable` |
+| `DATABASE_URL` | — | **required.** Postgres connection string, e.g. `postgres://user:pass@host:5432/cicache?sslmode=disable` |
 | `SETTINGS_ENCRYPTION_KEY` | — | **required.** Base64, 32 bytes. Encrypts cloud credentials at rest. Generate with `openssl rand -base64 32`. Losing/rotating this key makes any previously-saved cloud credentials undecryptable — you'd need to re-enter them from the Settings page. |
 | `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` | — | creates one admin user on startup, only if the `users` table is empty. Safe to leave set indefinitely — it's a no-op once any user exists. |
 | `COOKIE_SECURE` | `true` | set `false` only for local `http://` development; must be `true` once served over TLS |
@@ -169,14 +177,14 @@ No `nx.json` changes are required. Point the Nx client at the server via
 environment variables in your CI job (and locally, if desired):
 
 ```bash
-export NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://nx-cache.example.com
+export NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://cache.example.com
 export NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=$CACHE_TOKEN
 ```
 
 ## Turborepo client configuration
 
 ```bash
-export TURBO_API=https://nx-cache.example.com
+export TURBO_API=https://cache.example.com
 export TURBO_TOKEN=$CACHE_TOKEN
 export TURBO_TEAM=any-name   # required by turbo to enable remote caching; its value is ignored
 ```
@@ -191,7 +199,9 @@ in `turbo.json` and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` (32+ bytes) in CI.
   container), `golangci-lint`, and a Docker build-only check.
 - `.github/workflows/docker-publish.yml` — on push of a `vX.Y.Z` tag only:
   builds a multi-arch (amd64/arm64) image (Node build stage → Go build
-  stage → distroless runtime) and pushes it to `ghcr.io/<owner>/<repo>`.
+  stage → distroless runtime) and pushes it to
+  `ghcr.io/<owner>/ci-remote-cache` (and, for now, the old
+  `ghcr.io/<owner>/nx-remote-cache` name).
   Merges to `main` run CI but do not publish an image — cut a tag (`git tag
   v0.1.0 && git push origin v0.1.0`) when you want a new release.
 
@@ -213,6 +223,24 @@ TEST_DATABASE_URL="postgres://postgres:test@localhost:5432/postgres?sslmode=disa
 truncate its tables at the start of each test, which races if package
 binaries run in parallel.
 
+## Upgrading from nx-remote-cache
+
+Point your deployment at `ghcr.io/<owner>/ci-remote-cache`; the old image
+name keeps receiving releases for a while. Nothing else is required:
+
+- Existing tokens keep working. New ones are prefixed `crc_` instead of
+  `nxc_`.
+- Existing Nx cache entries stay readable. New uploads go under `nx/` in
+  storage, and the old root-level entries age out through the usual
+  retention.
+- Admins are logged out once, because the session cookie was renamed.
+
+The local `docker-compose.yml` now uses `cicache` as the Postgres user and
+database. A Postgres volume created by the old file still has the `nxcache`
+user, so either recreate it (`docker compose down -v`, which deletes local
+data) or change `DATABASE_URL` in the compose file back to the old
+credentials.
+
 ## Example: consumer repo workflow
 
 A separate repo building with Nx would use the cache like this:
@@ -223,7 +251,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NX_SELF_HOSTED_REMOTE_CACHE_SERVER: https://nx-cache.example.com
+      NX_SELF_HOSTED_REMOTE_CACHE_SERVER: https://cache.example.com
       # Write token only available on trusted refs; fork PRs fall back to
       # the read-only token (or no token) and simply get cache misses on
       # write, cache hits on read.

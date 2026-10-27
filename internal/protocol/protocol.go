@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"nx-remote-cache/internal/httplog"
+	"ci-remote-cache/internal/httplog"
 )
 
 type Protocol interface {

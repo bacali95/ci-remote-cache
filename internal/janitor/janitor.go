@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	"nx-remote-cache/internal/storage"
-	"nx-remote-cache/internal/store"
+	"ci-remote-cache/internal/storage"
+	"ci-remote-cache/internal/store"
 )
 
 // ReadStatsSource is the subset of *store.Store the janitor needs — kept
