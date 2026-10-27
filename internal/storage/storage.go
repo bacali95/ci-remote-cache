@@ -36,10 +36,11 @@ type Backend interface {
 	// if absent.
 	Delete(ctx context.Context, key string) error
 
-	// List returns up to limit entries starting after cursor (empty cursor
-	// starts from the beginning). NextCursor in the returned page is empty
-	// once there are no more entries.
-	List(ctx context.Context, cursor string, limit int) (ListPage, error)
+	// List returns up to limit entries whose key starts with prefix (empty
+	// prefix lists everything), starting after cursor (empty cursor starts
+	// from the beginning). NextCursor in the returned page is empty once
+	// there are no more entries.
+	List(ctx context.Context, prefix, cursor string, limit int) (ListPage, error)
 }
 
 // Entry describes one stored cache artifact, as surfaced by List.

@@ -68,7 +68,7 @@ func (f *fakeBackend) Delete(_ context.Context, hash string) error {
 // the first page, and any other cursor returns the page right after the
 // one whose NextCursor matches it — enough to simulate real pagination
 // without needing a real backend.
-func (f *fakeBackend) List(_ context.Context, cursor string, _ int) (storage.ListPage, error) {
+func (f *fakeBackend) List(_ context.Context, _, cursor string, _ int) (storage.ListPage, error) {
 	if f.listErr != nil {
 		return storage.ListPage{}, f.listErr
 	}

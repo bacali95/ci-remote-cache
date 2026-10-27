@@ -111,7 +111,7 @@ func TestLocalListPagination(t *testing.T) {
 		}
 	}
 
-	page1, err := l.List(ctx, "", 2)
+	page1, err := l.List(ctx, "", "", 2)
 	if err != nil {
 		t.Fatalf("List page1: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestLocalListPagination(t *testing.T) {
 		t.Fatalf("page1.NextCursor = %q, want a2", page1.NextCursor)
 	}
 
-	page2, err := l.List(ctx, page1.NextCursor, 2)
+	page2, err := l.List(ctx, "", page1.NextCursor, 2)
 	if err != nil {
 		t.Fatalf("List page2: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestLocalListPagination(t *testing.T) {
 		t.Fatalf("page2 = %+v, want [a3 a4]", page2.Entries)
 	}
 
-	page3, err := l.List(ctx, page2.NextCursor, 2)
+	page3, err := l.List(ctx, "", page2.NextCursor, 2)
 	if err != nil {
 		t.Fatalf("List page3: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestLocalNamespacedKeysAlongsideLegacyRootKeys(t *testing.T) {
 		t.Fatalf("Get(turbo/a) = %q (size %d)", got, size)
 	}
 
-	page, err := l.List(ctx, "", 10)
+	page, err := l.List(ctx, "", "", 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestLocalListFailsWhenNamespaceDirUnreadable(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(nsDir, 0o755) })
 
-	if _, err := l.List(context.Background(), "", 10); err == nil {
+	if _, err := l.List(context.Background(), "", "", 10); err == nil {
 		t.Fatal("List err = nil, want an error for an unreadable namespace dir")
 	}
 }
@@ -262,4 +262,35 @@ func TestLocalPutFailsWhenNamespaceDirCannotBeCreated(t *testing.T) {
 	if err := l.Put(context.Background(), "nx/a", bytes.NewReader([]byte("x")), 1); err == nil {
 		t.Fatal("Put err = nil, want an error when the namespace path is a file")
 	}
+}
+
+// testListByKeyPrefix checks that List's prefix selects one namespace,
+// excluding legacy root keys and other namespaces. Shared by every backend.
+func testListByKeyPrefix(t *testing.T, b Backend) {
+	t.Helper()
+	ctx := context.Background()
+	for _, k := range []string{"legacy", "nx/a", "turbo/b", "turbo/c"} {
+		if err := b.Put(ctx, k, bytes.NewReader([]byte("x")), 1); err != nil {
+			t.Fatalf("Put(%s): %v", k, err)
+		}
+	}
+	page, err := b.List(ctx, "turbo/", "", 10)
+	if err != nil {
+		t.Fatalf("List(turbo/): %v", err)
+	}
+	var keys []string
+	for _, e := range page.Entries {
+		keys = append(keys, e.Key)
+	}
+	if want := []string{"turbo/b", "turbo/c"}; !slices.Equal(keys, want) {
+		t.Fatalf("List(turbo/) keys = %v, want %v", keys, want)
+	}
+}
+
+func TestLocalListByKeyPrefix(t *testing.T) {
+	l, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	testListByKeyPrefix(t, l)
 }

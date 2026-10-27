@@ -64,7 +64,12 @@ export interface Token {
 }
 
 export interface CacheEntry {
+  // Storage key, e.g. "nx/<hash>"; identifies the entry for deletes.
+  key: string
+  protocol: string
   hash: string
+  // Stored before keys were namespaced; still served to Nx clients.
+  legacy?: boolean
   size: number
   modTime: string
   readCount: number

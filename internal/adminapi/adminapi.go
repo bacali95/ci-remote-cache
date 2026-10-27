@@ -57,7 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/tokens/{id}", s.protected(s.handleRevokeToken))
 
 	mux.HandleFunc("GET /admin/api/cache", s.protected(s.handleListCache))
-	mux.HandleFunc("DELETE /admin/api/cache/{hash}", s.protected(s.handleDeleteCacheEntry))
+	mux.HandleFunc("DELETE /admin/api/cache/{key}", s.protected(s.handleDeleteCacheEntry))
 	mux.HandleFunc("POST /admin/api/cache/bulk-delete", s.protected(s.handleBulkDelete))
 	mux.HandleFunc("POST /admin/api/cache/prune", s.protected(s.handlePrune))
 

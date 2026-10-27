@@ -357,3 +357,20 @@ func TestQueryMapsKeysBackToHashes(t *testing.T) {
 		t.Fatal("Query err = nil, want the tracker's error")
 	}
 }
+
+func TestSplitKey(t *testing.T) {
+	tests := []struct {
+		key, namespace, hash string
+		legacy               bool
+	}{
+		{"nx/abc", "nx", "abc", false},
+		{"turbo/def", "turbo", "def", false},
+		{"old", "nx", "old", true},
+	}
+	for _, tt := range tests {
+		ns, h, legacy := SplitKey(tt.key)
+		if ns != tt.namespace || h != tt.hash || legacy != tt.legacy {
+			t.Errorf("SplitKey(%q) = %q, %q, %v; want %q, %q, %v", tt.key, ns, h, legacy, tt.namespace, tt.hash, tt.legacy)
+		}
+	}
+}

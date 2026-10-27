@@ -62,7 +62,7 @@ func TestDynamicGetDeleteList(t *testing.T) {
 		t.Fatalf("size = %d, want 7", size)
 	}
 
-	page, err := d.List(ctx, "", 10)
+	page, err := d.List(ctx, "", "", 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

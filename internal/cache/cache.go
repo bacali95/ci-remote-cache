@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -163,4 +164,14 @@ func (s *Service) Query(ctx context.Context, namespace string, hashes []string) 
 		}
 	}
 	return out, nil
+}
+
+// SplitKey returns the protocol namespace and hash a storage key belongs
+// to. legacy is true for bare keys stored before namespacing, which belong
+// to the legacy namespace.
+func SplitKey(key string) (namespace, hash string, legacy bool) {
+	if ns, h, ok := strings.Cut(key, "/"); ok {
+		return ns, h, false
+	}
+	return legacyNamespace, key, true
 }

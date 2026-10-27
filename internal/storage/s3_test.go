@@ -310,7 +310,7 @@ func TestS3ListWithPrefixAndPagination(t *testing.T) {
 		}
 	}
 
-	page1, err := s.List(ctx, "", 2)
+	page1, err := s.List(ctx, "", "", 2)
 	if err != nil {
 		t.Fatalf("List page1: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestS3ListWithPrefixAndPagination(t *testing.T) {
 		t.Fatal("expected a NextCursor for a truncated page")
 	}
 
-	page2, err := s.List(ctx, page1.NextCursor, 2)
+	page2, err := s.List(ctx, "", page1.NextCursor, 2)
 	if err != nil {
 		t.Fatalf("List page2: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestS3ListWithoutPrefix(t *testing.T) {
 	if err := s.Put(ctx, "onlyhash", bytes.NewReader([]byte("x")), 1); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	page, err := s.List(ctx, "", 10)
+	page, err := s.List(ctx, "", "", 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestS3DeleteObjectCallSurfacesUnexpectedError(t *testing.T) {
 
 func TestS3ListSurfacesUnexpectedError(t *testing.T) {
 	s := newBrokenTestS3(t)
-	if _, err := s.List(context.Background(), "", 10); err == nil {
+	if _, err := s.List(context.Background(), "", "", 10); err == nil {
 		t.Fatal("expected an error from a 500 response")
 	}
 }
@@ -541,4 +541,9 @@ func TestIsNotFound(t *testing.T) {
 	if !isNotFound(&smithy.GenericAPIError{Code: "NoSuchKey"}) {
 		t.Error("isNotFound(NoSuchKey) = false, want true")
 	}
+}
+
+func TestS3ListByKeyPrefix(t *testing.T) {
+	t.Run("no bucket prefix", func(t *testing.T) { testListByKeyPrefix(t, newTestS3(t, "")) })
+	t.Run("bucket prefix", func(t *testing.T) { testListByKeyPrefix(t, newTestS3(t, "myprefix")) })
 }

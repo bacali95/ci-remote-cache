@@ -203,6 +203,8 @@ func (c *adminClient) revokeToken(id int64) {
 }
 
 type cacheEntry struct {
+	Key       string `json:"key"`
+	Protocol  string `json:"protocol"`
 	Hash      string `json:"hash"`
 	ReadCount int64  `json:"readCount"`
 }
@@ -296,7 +298,7 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(entries) != 1 || entries[0].Hash != "nx/"+hash {
+	if len(entries) != 1 || entries[0].Key != "nx/"+hash {
 		t.Fatalf("admin cache list = %+v, want one entry for nx/%s", entries, hash)
 	}
 	if entries[0].ReadCount == 0 {
@@ -322,7 +324,7 @@ func TestFullCacheAndAdminFlow(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	admin.deleteCacheEntry(entries[0].Hash)
+	admin.deleteCacheEntry(entries[0].Key)
 	if resp := cacheRequest(t, baseURL, http.MethodGet, hash, readTok.Token, nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET after admin delete: status = %d, want 404", resp.StatusCode)
 	} else {
@@ -403,7 +405,10 @@ func TestNxAndTurboShareTokensButNotArtifacts(t *testing.T) {
 
 	var keys []string
 	for _, e := range admin.listCache() {
-		keys = append(keys, e.Hash)
+		if e.Hash != hash {
+			t.Errorf("admin entry %s has hash %q, want %q", e.Key, e.Hash, hash)
+		}
+		keys = append(keys, e.Protocol+"/"+e.Hash)
 	}
 	slices.Sort(keys)
 	if want := []string{"nx/" + hash, "turbo/" + hash}; !slices.Equal(keys, want) {

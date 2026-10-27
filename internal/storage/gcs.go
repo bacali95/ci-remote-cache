@@ -119,14 +119,14 @@ func (g *GCS) Delete(ctx context.Context, hash string) error {
 	return nil
 }
 
-func (g *GCS) List(ctx context.Context, cursor string, limit int) (ListPage, error) {
+func (g *GCS) List(ctx context.Context, prefix, cursor string, limit int) (ListPage, error) {
 	if limit <= 0 {
 		limit = defaultListLimit
 	}
 
-	query := &storage.Query{}
+	query := &storage.Query{Prefix: prefix}
 	if g.prefix != "" {
-		query.Prefix = g.prefix + "/"
+		query.Prefix = g.prefix + "/" + prefix
 	}
 
 	it := g.bucket.Objects(ctx, query)

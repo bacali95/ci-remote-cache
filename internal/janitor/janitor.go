@@ -93,7 +93,7 @@ func (j *Janitor) Sweep(ctx context.Context) (int, error) {
 	deleted := 0
 	cursor := ""
 	for {
-		page, err := j.backend.List(ctx, cursor, 200)
+		page, err := j.backend.List(ctx, "", cursor, 200)
 		if err != nil {
 			return deleted, fmt.Errorf("list entries: %w", err)
 		}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"time"
 
+	"nx-remote-cache/internal/cache"
 	"nx-remote-cache/internal/storage"
 	"nx-remote-cache/internal/store"
 )
@@ -19,7 +21,12 @@ const (
 )
 
 type cacheEntryResponse struct {
-	Hash       string     `json:"hash"`
+	Key      string `json:"key"`
+	Protocol string `json:"protocol"`
+	Hash     string `json:"hash"`
+	// Legacy marks an entry stored before keys were namespaced. It's
+	// served to Nx clients but not listed under the "nx" protocol filter.
+	Legacy     bool       `json:"legacy,omitempty"`
 	Size       int64      `json:"size"`
 	ModTime    time.Time  `json:"modTime"`
 	ReadCount  int64      `json:"readCount"`
@@ -31,8 +38,19 @@ type listCacheResponse struct {
 	NextCursor string               `json:"nextCursor,omitempty"`
 }
 
+// validProtocol matches a storage key namespace (see storage.ValidKey).
+var validProtocol = regexp.MustCompile(`^[a-z0-9]{1,32}$`)
+
 func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store.User) {
 	cursor := r.URL.Query().Get("cursor")
+	prefix := ""
+	if p := r.URL.Query().Get("protocol"); p != "" {
+		if !validProtocol.MatchString(p) {
+			writeError(w, http.StatusBadRequest, "invalid protocol")
+			return
+		}
+		prefix = p + "/"
+	}
 	limit := defaultListLimit
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= maxListLimit {
@@ -40,18 +58,18 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 		}
 	}
 
-	page, err := s.backend.List(r.Context(), cursor, limit)
+	page, err := s.backend.List(r.Context(), prefix, cursor, limit)
 	if err != nil {
 		s.log.Error("list cache entries failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	hashes := make([]string, len(page.Entries))
+	keys := make([]string, len(page.Entries))
 	for i, e := range page.Entries {
-		hashes[i] = e.Key
+		keys[i] = e.Key
 	}
-	readStats, err := s.store.GetCacheReadStatsBatch(r.Context(), hashes)
+	readStats, err := s.store.GetCacheReadStatsBatch(r.Context(), keys)
 	if err != nil {
 		// Read stats are supplementary — don't fail the whole listing over
 		// them, just show zero reads for this page.
@@ -61,7 +79,11 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 
 	out := listCacheResponse{NextCursor: page.NextCursor}
 	for _, e := range page.Entries {
-		entry := cacheEntryResponse{Hash: e.Key, Size: e.Size, ModTime: e.ModTime}
+		protocol, hash, legacy := cache.SplitKey(e.Key)
+		entry := cacheEntryResponse{
+			Key: e.Key, Protocol: protocol, Hash: hash, Legacy: legacy,
+			Size: e.Size, ModTime: e.ModTime,
+		}
 		if stats, ok := readStats[e.Key]; ok {
 			entry.ReadCount = stats.ReadCount
 			entry.LastReadAt = stats.LastReadAt
@@ -86,37 +108,37 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 }
 
 func (s *Server) handleDeleteCacheEntry(w http.ResponseWriter, r *http.Request, _ store.User) {
-	hash := r.PathValue("hash")
-	if !storage.ValidKey(hash) {
-		writeError(w, http.StatusBadRequest, "invalid hash")
+	key := r.PathValue("key")
+	if !storage.ValidKey(key) {
+		writeError(w, http.StatusBadRequest, "invalid key")
 		return
 	}
 
-	err := s.backend.Delete(r.Context(), hash)
+	err := s.backend.Delete(r.Context(), key)
 	if errors.Is(err, storage.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
-		s.log.Error("delete cache entry failed", "hash", hash, "error", err)
+		s.log.Error("delete cache entry failed", "key", key, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	s.clearReadStats(r.Context(), hash)
+	s.clearReadStats(r.Context(), key)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// clearReadStats removes a deleted entry's read-tracking row, best-effort —
-// a failure here must never block or fail the delete that already
-// succeeded against the storage backend.
-func (s *Server) clearReadStats(ctx context.Context, hash string) {
-	if err := s.store.DeleteCacheArtifact(ctx, hash); err != nil {
-		s.log.Warn("clear cache read stats failed", "hash", hash, "error", err)
+// clearReadStats removes a deleted entry's tracking row, best-effort — a
+// failure here must never block or fail the delete that already succeeded
+// against the storage backend.
+func (s *Server) clearReadStats(ctx context.Context, key string) {
+	if err := s.store.DeleteCacheArtifact(ctx, key); err != nil {
+		s.log.Warn("clear cache artifact row failed", "key", key, "error", err)
 	}
 }
 
 type bulkDeleteRequest struct {
-	Hashes []string `json:"hashes"`
+	Keys []string `json:"keys"`
 }
 
 type deleteCountResponse struct {
@@ -129,22 +151,22 @@ func (s *Server) handleBulkDelete(w http.ResponseWriter, r *http.Request, _ stor
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if len(req.Hashes) > maxBulkDelete {
-		writeError(w, http.StatusBadRequest, "too many hashes in one request (max 1000)")
+	if len(req.Keys) > maxBulkDelete {
+		writeError(w, http.StatusBadRequest, "too many keys in one request (max 1000)")
 		return
 	}
 
 	deleted := 0
-	for _, h := range req.Hashes {
-		if !storage.ValidKey(h) {
+	for _, k := range req.Keys {
+		if !storage.ValidKey(k) {
 			continue
 		}
-		err := s.backend.Delete(r.Context(), h)
+		err := s.backend.Delete(r.Context(), k)
 		if err == nil {
-			s.clearReadStats(r.Context(), h)
+			s.clearReadStats(r.Context(), k)
 			deleted++
 		} else if !errors.Is(err, storage.ErrNotFound) {
-			s.log.Warn("bulk delete: failed to delete entry", "hash", h, "error", err)
+			s.log.Warn("bulk delete: failed to delete entry", "key", k, "error", err)
 		}
 	}
 	writeJSON(w, http.StatusOK, deleteCountResponse{Deleted: deleted})
@@ -183,7 +205,7 @@ func (s *Server) pruneOlderThan(ctx context.Context, cutoff time.Time) (int, err
 	cursor := ""
 	deleted := 0
 	for {
-		page, err := s.backend.List(ctx, cursor, 200)
+		page, err := s.backend.List(ctx, "", cursor, 200)
 		if err != nil {
 			return deleted, err
 		}

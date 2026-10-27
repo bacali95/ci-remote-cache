@@ -46,6 +46,13 @@ describe("TokensPage", () => {
     expect(screen.getByText(new Date(writeToken.lastUsedAt).toLocaleString())).toBeInTheDocument()
   })
 
+  it("shows client setup with a placeholder token on the page", async () => {
+    render(<TokensPage />)
+    await screen.findByText("ci-write")
+    expect(screen.getByText("Connect a repository")).toBeInTheDocument()
+    expect(screen.getByLabelText("Environment variables")).toHaveTextContent("<your-token>")
+  })
+
   it("shows an empty state with no tokens", async () => {
     vi.mocked(api.get).mockResolvedValue([])
     render(<TokensPage />)
@@ -92,6 +99,10 @@ describe("TokensPage", () => {
     expect(await screen.findByText("Token created")).toBeInTheDocument()
     const tokenField = screen.getByDisplayValue("raw-token-value")
     expect(tokenField).toBeInTheDocument()
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByLabelText("Environment variables")).toHaveTextContent(
+      "NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=raw-token-value"
+    )
 
     await user.click(tokenField)
     expect(tokenField).toHaveFocus()

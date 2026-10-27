@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -110,12 +111,12 @@ func (l *Local) Delete(_ context.Context, key string) error {
 
 const defaultListLimit = 50
 
-func (l *Local) List(_ context.Context, cursor string, limit int) (ListPage, error) {
+func (l *Local) List(_ context.Context, prefix, cursor string, limit int) (ListPage, error) {
 	if limit <= 0 {
 		limit = defaultListLimit
 	}
 
-	names, err := l.keys()
+	names, err := l.keys(prefix)
 	if err != nil {
 		return ListPage{}, err
 	}
@@ -140,10 +141,10 @@ func (l *Local) List(_ context.Context, cursor string, limit int) (ListPage, err
 	return page, nil
 }
 
-// keys returns every stored key, sorted, so a simple greater-than scan
-// gives cursor-based pagination. Bare files at the root are keys stored
-// before namespacing; each subdirectory is one namespace.
-func (l *Local) keys() ([]string, error) {
+// keys returns every stored key starting with prefix, sorted, so a simple
+// greater-than scan gives cursor-based pagination. Bare files at the root
+// are keys stored before namespacing; each subdirectory is one namespace.
+func (l *Local) keys(prefix string) ([]string, error) {
 	root, err := os.ReadDir(l.dir)
 	if err != nil {
 		return nil, err
@@ -167,5 +168,5 @@ func (l *Local) keys() ([]string, error) {
 		}
 	}
 	sort.Strings(keys)
-	return keys, nil
+	return slices.DeleteFunc(keys, func(k string) bool { return !strings.HasPrefix(k, prefix) }), nil
 }

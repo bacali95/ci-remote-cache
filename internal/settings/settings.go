@@ -192,7 +192,7 @@ func (m *Manager) Apply(ctx context.Context, in ApplyInput) (Settings, error) {
 	if err != nil {
 		return Settings{}, fmt.Errorf("%w: connect to storage backend: %v", ErrInvalidSettings, err)
 	}
-	if _, err := newBackend.List(ctx, "", 1); err != nil {
+	if _, err := newBackend.List(ctx, "", "", 1); err != nil {
 		return Settings{}, fmt.Errorf("%w: storage backend connectivity check failed: %v", ErrInvalidSettings, err)
 	}
 

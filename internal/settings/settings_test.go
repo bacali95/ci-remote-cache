@@ -92,7 +92,7 @@ func TestLoadAppliesSeededDefaults(t *testing.T) {
 	}
 
 	// The Dynamic backend should now be usable (backed by a real local dir).
-	if _, err := dyn.List(ctx, "", 1); err != nil {
+	if _, err := dyn.List(ctx, "", "", 1); err != nil {
 		t.Fatalf("backend from Load should work: %v", err)
 	}
 }
@@ -188,7 +188,7 @@ func TestApplyRejectsInvalidSettingsWithoutSwapping(t *testing.T) {
 	if after != before {
 		t.Fatalf("Current() changed after a rejected Apply: before=%+v after=%+v", before, after)
 	}
-	if _, err := dyn.List(ctx, "", 1); err != nil {
+	if _, err := dyn.List(ctx, "", "", 1); err != nil {
 		t.Fatalf("backend should still be the original working one: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestApplyRejectsUnreachableS3WithoutSwapping(t *testing.T) {
 		t.Fatalf("Apply against unreachable S3: err = %v, want ErrInvalidSettings", err)
 	}
 
-	if _, err := dyn.List(ctx, "", 1); err != nil {
+	if _, err := dyn.List(ctx, "", "", 1); err != nil {
 		t.Fatalf("backend should still be the original local one, not swapped to broken s3: %v", err)
 	}
 }

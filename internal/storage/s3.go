@@ -150,7 +150,7 @@ func (s *S3) Delete(ctx context.Context, hash string) error {
 	return nil
 }
 
-func (s *S3) List(ctx context.Context, cursor string, limit int) (ListPage, error) {
+func (s *S3) List(ctx context.Context, prefix, cursor string, limit int) (ListPage, error) {
 	if limit <= 0 {
 		limit = defaultListLimit
 	}
@@ -160,7 +160,10 @@ func (s *S3) List(ctx context.Context, cursor string, limit int) (ListPage, erro
 		MaxKeys: aws.Int32(int32(limit)),
 	}
 	if s.prefix != "" {
-		input.Prefix = aws.String(s.prefix + "/")
+		prefix = s.prefix + "/" + prefix
+	}
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
 	}
 	if cursor != "" {
 		input.ContinuationToken = aws.String(cursor)
